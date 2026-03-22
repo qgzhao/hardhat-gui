@@ -18,7 +18,6 @@ const CONFIG = {
   maxBlocks: 200,
   maxTransactions: 500,
   maxLogs: 500,
-  pollInterval: 1000
 }
 
 // ============ Hardhat 默认账户私钥 ============
@@ -198,42 +197,52 @@ async function fetchBlock(numOrTag) {
   return formatted
 }
 
-// ============ 轮询主循环 ============
-async function pollBlocks() {
+// ============================================================
+// WebSocket 连接管理（替代轮询）
+// ============================================================
+
+function toWsUrl(url) {
+  return url.replace(/^http/, 'ws')
+}
+
+// WS 连接状态
+const ws = {
+  socket:         null,
+  url:            null,
+  subIdHeads:     null,   // newHeads 订阅 ID
+  subIdLogs:      null,   // logs 订阅 ID
+  nextId:         10,     // 消息 ID 计数器
+  pending:        new Map(), // id → { resolve, reject, timer }
+  reconnectTimer: null,
+  reconnectDelay: 1000,   // 指数退避初始值，最大 30s
+}
+
+// --- 网络初始化（首次连接 & 重连后）---
+async function initNetwork() {
   try {
+    const [chainIdHex, clientVersion] = await Promise.all([
+      rpc('eth_chainId'),
+      rpc('web3_clientVersion').catch(() => 'Hardhat'),
+    ])
+    const newChainId = hexToDec(chainIdHex)
+
+    // Chain ID 变化时清空旧链数据
+    if (cache.networkInfo.chainId !== null && cache.networkInfo.chainId !== newChainId) {
+      cache.blocks = []
+      cache.transactions.clear()
+      cache.logs = []
+      cache.networkInfo.latestBlock = -1
+    }
+    cache.networkInfo.chainId = newChainId
+    cache.networkInfo.clientVersion = clientVersion
+    cache.connected = true
+
+    await fetchAccounts()
+
+    // 补全断线期间遗漏的区块（最多回溯 20 个）
     const latestHex = await rpc('eth_blockNumber')
     const latest = hexToDec(latestHex)
-
-    // 首次连接或断线重连时：强制重新读取 Chain ID
-    // （节点可能已用不同的 --chain-id 重启）
-    if (!cache.connected) {
-      cache.connected = true
-      const [chainIdHex, clientVersion] = await Promise.all([
-        rpc('eth_chainId'),
-        rpc('web3_clientVersion').catch(() => 'Hardhat')
-      ])
-      const newChainId = hexToDec(chainIdHex)
-      // Chain ID 变化时清空旧链的历史数据
-      if (cache.networkInfo.chainId !== null && cache.networkInfo.chainId !== newChainId) {
-        cache.blocks = []
-        cache.transactions.clear()
-        cache.logs = []
-        cache.networkInfo.latestBlock = -1
-      }
-      cache.networkInfo.chainId = newChainId
-      cache.networkInfo.clientVersion = clientVersion
-      await fetchAccounts()
-      broadcast('status', {
-        connected: true,
-        chainId: cache.networkInfo.chainId,
-        clientVersion: cache.networkInfo.clientVersion,
-        latestBlock: latest,
-        rpcUrl: CONFIG.rpcUrl
-      })
-    }
-
-    // 同步新区块
-    const start = cache.networkInfo.latestBlock + 1
+    const start = Math.max(cache.networkInfo.latestBlock + 1, latest - 19)
     for (let i = start; i <= latest; i++) {
       const block = await fetchBlock(i)
       if (!block) continue
@@ -243,19 +252,175 @@ async function pollBlocks() {
       broadcast('block', block)
     }
 
-    // 每 5 个区块刷新余额
-    if (latest > 0 && (latest - start >= 0) && latest % 5 === 0) {
-      await fetchAccounts()
-      broadcast('accounts', cache.accounts)
-    }
-
+    broadcast('status', {
+      connected: true,
+      chainId:       cache.networkInfo.chainId,
+      clientVersion: cache.networkInfo.clientVersion,
+      latestBlock:   cache.networkInfo.latestBlock,
+      rpcUrl:        CONFIG.rpcUrl,
+    })
+    broadcast('accounts', cache.accounts)
   } catch (err) {
+    console.error('  初始化网络信息失败:', err.message)
+  }
+}
+
+// --- 处理 newHeads 订阅事件 ---
+async function handleNewHead(header) {
+  const num = hexToDec(header.number)
+  if (num <= cache.networkInfo.latestBlock) return   // 已处理过
+
+  try {
+    const block = await fetchBlock(num)
+    if (!block) return
+    cache.blocks.unshift(block)
+    if (cache.blocks.length > CONFIG.maxBlocks) cache.blocks.pop()
+    cache.networkInfo.latestBlock = num
+    broadcast('block', block)
+
+    // 每个新块刷新余额（事件驱动，仅在有新块时触发）
+    await fetchAccounts()
+    broadcast('accounts', cache.accounts)
+  } catch (err) {
+    console.error(`  处理区块 #${num} 失败:`, err.message)
+  }
+}
+
+// --- 处理 logs 订阅推送 ---
+function handleWsLog(log) {
+  const logData = {
+    id:              `${log.transactionHash}-${log.logIndex}`,
+    blockNumber:     hexToDec(log.blockNumber),
+    transactionHash: log.transactionHash,
+    address:         log.address,
+    topics:          log.topics,
+    data:            log.data,
+    logIndex:        hexToDec(log.logIndex),
+  }
+  if (cache.logs.find(l => l.id === logData.id)) return
+  cache.logs.unshift(logData)
+  if (cache.logs.length > CONFIG.maxLogs) cache.logs.pop()
+  broadcast('log', logData)
+}
+
+// --- 分发 WS 消息 ---
+function handleWsMessage(raw) {
+  let msg
+  try { msg = JSON.parse(raw) } catch { return }
+
+  // 订阅推送（无 id，method = eth_subscription）
+  if (msg.method === 'eth_subscription') {
+    const { subscription, result } = msg.params
+    if (subscription === ws.subIdHeads) handleNewHead(result)
+    else if (subscription === ws.subIdLogs) handleWsLog(result)
+    return
+  }
+
+  // RPC 响应（有 id，对应 pending 请求）
+  if (msg.id != null && ws.pending.has(msg.id)) {
+    const { resolve, reject, timer } = ws.pending.get(msg.id)
+    clearTimeout(timer)
+    ws.pending.delete(msg.id)
+    msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result)
+  }
+}
+
+// 通过 WS 发起 JSON-RPC（仅用于 eth_subscribe / eth_unsubscribe）
+function wsSend(method, params) {
+  return new Promise((resolve, reject) => {
+    if (!ws.socket || ws.socket.readyState !== WebSocket.OPEN) {
+      return reject(new Error('WS 未就绪'))
+    }
+    const id = ws.nextId++
+    const timer = setTimeout(() => {
+      ws.pending.delete(id)
+      reject(new Error(`WS RPC 超时: ${method}`))
+    }, 8000)
+    ws.pending.set(id, { resolve, reject, timer })
+    ws.socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+  })
+}
+
+// --- 建立订阅并初始化网络数据 ---
+async function setupSubscriptions() {
+  try {
+    ws.subIdHeads = await wsSend('eth_subscribe', ['newHeads'])
+    ws.subIdLogs  = await wsSend('eth_subscribe', ['logs', {}])
+    console.log(`  ✓ 订阅建立 heads=...${ws.subIdHeads?.slice(-6)}  logs=...${ws.subIdLogs?.slice(-6)}`)
+    await initNetwork()
+  } catch (err) {
+    console.error('  建立订阅失败:', err.message)
+    if (ws.socket) ws.socket.close()
+  }
+}
+
+// --- 指数退避重连 ---
+function scheduleReconnect() {
+  if (ws.reconnectTimer) return
+  console.log(`  → WS 将在 ${ws.reconnectDelay / 1000}s 后重连 (${ws.url})`)
+  ws.reconnectTimer = setTimeout(() => {
+    ws.reconnectTimer = null
+    connectWS(ws.url)
+  }, ws.reconnectDelay)
+  ws.reconnectDelay = Math.min(ws.reconnectDelay * 2, 30000)
+}
+
+// --- 连接 WebSocket ---
+function connectWS(url) {
+  if (ws.socket) {
+    try { ws.socket.close() } catch {}
+    ws.socket = null
+  }
+  ws.url        = url
+  ws.subIdHeads = null
+  ws.subIdLogs  = null
+
+  let socket
+  try {
+    socket = new WebSocket(url)
+  } catch (err) {
+    console.error(`  WS 连接失败 (${url}):`, err.message)
+    scheduleReconnect()
+    return
+  }
+  ws.socket = socket
+
+  socket.addEventListener('open', () => {
+    console.log(`  ✓ WS 已连接: ${url}`)
+    ws.reconnectDelay = 1000  // 重置退避
+    setupSubscriptions()
+  })
+
+  socket.addEventListener('message', ({ data }) => handleWsMessage(data))
+
+  socket.addEventListener('close', ({ code }) => {
+    ws.socket = null
     if (cache.connected) {
       cache.connected = false
       cache.networkInfo.latestBlock = -1
-      broadcast('status', { connected: false, error: err.message })
+      broadcast('status', { connected: false, error: `WS 连接断开 (code: ${code})` })
     }
-  }
+    scheduleReconnect()
+  })
+
+  socket.addEventListener('error', () => {
+    // error 事件后必然触发 close，重连逻辑在 close 中处理
+  })
+}
+
+// 切换到新节点（节点管理模块调用）
+function switchNode(httpUrl) {
+  CONFIG.rpcUrl = httpUrl
+  // 取消未执行的重连计划，重置退避
+  if (ws.reconnectTimer) { clearTimeout(ws.reconnectTimer); ws.reconnectTimer = null }
+  ws.reconnectDelay = 1000
+  // 清空旧链缓存
+  cache.blocks = []
+  cache.transactions.clear()
+  cache.logs = []
+  cache.connected = false
+  cache.networkInfo = { chainId: null, clientVersion: null, latestBlock: -1 }
+  connectWS(toWsUrl(httpUrl))
 }
 
 // ============ 扫描 Artifacts ============
@@ -404,33 +569,24 @@ app.post('/api/rpc', async (req, res) => {
     const result = await rpc(method, params)
 
     if (method === 'hardhat_reset') {
-      // 重置后重新读取 Chain ID（fork 配置可能改变链 ID），并清空历史缓存
+      // 重置后清空缓存，WS 订阅仍然有效，通过 initNetwork 重新同步
       setTimeout(async () => {
-        try {
-          const chainIdHex = await rpc('eth_chainId')
-          cache.networkInfo.chainId = hexToDec(chainIdHex)
-          cache.networkInfo.latestBlock = -1
-          cache.blocks = []
-          cache.transactions.clear()
-          cache.logs = []
-          await fetchAccounts()
-          broadcast('status', {
-            connected: true,
-            chainId: cache.networkInfo.chainId,
-            clientVersion: cache.networkInfo.clientVersion,
-            latestBlock: 0,
-            rpcUrl: CONFIG.rpcUrl
-          })
-          broadcast('accounts', cache.accounts)
-        } catch { /* 节点尚未就绪，下次轮询会自动恢复 */ }
+        cache.blocks = []
+        cache.transactions.clear()
+        cache.logs = []
+        cache.networkInfo.latestBlock = -1
+        await initNetwork()
       }, 500)
-    } else if (method === 'evm_mine' || method === 'evm_revert') {
-      // 挖块/回滚后刷新账户余额
+    } else if (method === 'evm_revert') {
+      // 回滚不触发 newHeads 事件，需手动清理失效区块并重新同步
       setTimeout(async () => {
-        await fetchAccounts()
-        broadcast('accounts', cache.accounts)
+        cache.blocks = []
+        cache.transactions.clear()
+        cache.networkInfo.latestBlock = -1
+        await initNetwork()
       }, 200)
     }
+    // evm_mine：WS newHeads 订阅自动处理，无需额外操作
 
     res.json({ result })
   } catch (err) {
@@ -637,12 +793,12 @@ async function startHardhatNode() {
       if (!started && /Started HTTP.*server at/i.test(line)) {
         started = true
         nodeState.status = 'running'
-        // 同步更新 CONFIG.rpcUrl，让 GUI 轮询连上新节点
-        CONFIG.rpcUrl = `http://${cfg.hostname}:${cfg.port}`
-        // 解析账户
         nodeState.accounts = parseAccountsFromOutput(stdoutBuf)
         broadcastNodeStatus()
-        broadcastConsole(`✓ 节点已就绪，监听 ${CONFIG.rpcUrl}`, 'success')
+        const newUrl = `http://${cfg.hostname}:${cfg.port}`
+        broadcastConsole(`✓ 节点已就绪，监听 ${newUrl}`, 'success')
+        // 切换 WS 连接到新节点（同时更新 CONFIG.rpcUrl 并重建订阅）
+        switchNode(newUrl)
       }
     }
   })
@@ -787,7 +943,6 @@ app.listen(CONFIG.port, () => {
   console.log(`  合约目录: ${CONFIG.artifactsDir}`)
   console.log('  等待连接 Hardhat 节点...\n')
 
-  // 启动轮询
-  setInterval(pollBlocks, CONFIG.pollInterval)
-  pollBlocks()
+  // 建立 WebSocket 连接（含自动重连）
+  connectWS(toWsUrl(CONFIG.rpcUrl))
 })
