@@ -301,6 +301,7 @@ html, body {
 
 .btn-sm  { padding: 4px 10px; font-size: 12px; }
 .btn-xs  { padding: 2px 7px;  font-size: 11px; }
+.lang-btn { font-size: 12px; padding: 3px 10px; letter-spacing: 0.03em; }
 
 .btn-close {
   background: none;

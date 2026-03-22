@@ -1,5 +1,7 @@
 # Hardhat GUI
 
+**中文** | [English](README.en.md)
+
 Hardhat 本地节点的可视化管理界面，功能对标 Ganache，提供全中文界面，通过浏览器访问。
 
 > 内置 Hardhat，无需外部项目，无需构建工具，一条命令启动。

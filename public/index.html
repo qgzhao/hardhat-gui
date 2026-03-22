@@ -15,15 +15,17 @@
       <div class="logo">⛏ Hardhat GUI</div>
       <div class="status-dot" :class="status.connected ? 'dot-ok' : 'dot-err'"></div>
       <div class="status-label" :class="status.connected ? 'text-ok' : 'text-err'">
-        {{ status.connected ? '已连接' : '未连接' }}
+        {{ status.connected ? t('connected') : t('disconnected') }}
       </div>
     </div>
     <div class="header-meta">
       <span class="meta-item">Chain ID <strong>{{ status.chainId ?? '--' }}</strong></span>
       <span class="meta-sep">|</span>
-      <span class="meta-item">最新区块 <strong>#{{ status.latestBlock >= 0 ? status.latestBlock : '--' }}</strong></span>
+      <span class="meta-item">{{ t('latestBlock') }} <strong>#{{ status.latestBlock >= 0 ? status.latestBlock : '--' }}</strong></span>
       <span class="meta-sep">|</span>
       <span class="meta-item rpc">{{ status.rpcUrl || 'http://127.0.0.1:8545' }}</span>
+      <span class="meta-sep">|</span>
+      <button @click="toggleLang" class="btn btn-ghost btn-sm lang-btn">{{ lang === 'zh' ? 'EN' : '中文' }}</button>
     </div>
   </header>
 
@@ -35,46 +37,46 @@
         class="tab-btn"
         :class="{ active: activeTab === tab.id }"
         @click="switchTab(tab.id)">
-        {{ tab.label }}
+        {{ t('tab_' + tab.id) }}
         <span v-if="tab.id === 'transactions' && transactions.total > 0" class="tab-count">{{ transactions.total }}</span>
         <span v-if="tab.id === 'logs' && logs.length > 0" class="tab-count">{{ logs.length }}</span>
         <span v-if="tab.id === 'node'" class="tab-count" :class="nodeStatusClass">{{ nodeStatusDot }}</span>
       </button>
     </div>
     <div class="toolbar">
-      <button @click="mine" :disabled="!status.connected" class="btn btn-primary btn-sm" title="立即挖出一个区块">
-        ⛏ 出块
+      <button @click="mine" :disabled="!status.connected" class="btn btn-primary btn-sm" :title="t('mineTitle')">
+        {{ t('mine') }}
       </button>
-      <label class="toggle-label" title="开启后每笔交易自动出块">
+      <label class="toggle-label" :title="t('automineTitle')">
         <input type="checkbox" v-model="automine" @change="toggleAutomine" :disabled="!status.connected">
         <span class="toggle-track"><span class="toggle-thumb"></span></span>
-        <span>自动出块</span>
+        <span>{{ t('automine') }}</span>
       </label>
-      <button @click="showSnapshotModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">📸 快照</button>
-      <button @click="showTimeModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">⏩ 时间</button>
+      <button @click="showSnapshotModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">{{ t('snapshot') }}</button>
+      <button @click="showTimeModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">{{ t('timeCtrl') }}</button>
     </div>
   </nav>
 
   <!-- ==================== 账户 ==================== -->
   <div v-if="activeTab === 'accounts'" class="tab-content">
     <div class="panel-header">
-      <h2>账户列表</h2>
-      <button @click="loadAccounts" class="btn btn-ghost btn-sm">↺ 刷新</button>
+      <h2>{{ t('accountList') }}</h2>
+      <button @click="loadAccounts" class="btn btn-ghost btn-sm">{{ t('refresh') }}</button>
     </div>
 
     <div v-if="accounts.length === 0" class="empty-state">
-      <div v-if="!status.connected">⚠ 未连接节点，请启动 <code>npx hardhat node</code></div>
-      <div v-else>加载中...</div>
+      <div v-if="!status.connected">{{ t('notConnected') }}</div>
+      <div v-else>{{ t('loading') }}</div>
     </div>
 
     <table v-else class="table">
       <thead>
         <tr>
-          <th style="width:40px">#</th>
-          <th>地址</th>
-          <th style="width:140px">余额 (ETH)</th>
-          <th style="width:80px">Nonce</th>
-          <th style="width:100px">操作</th>
+          <th style="width:40px">{{ t('colIndex') }}</th>
+          <th>{{ t('colAddress') }}</th>
+          <th style="width:140px">{{ t('colBalance') }}</th>
+          <th style="width:80px">{{ t('colNonce') }}</th>
+          <th style="width:100px">{{ t('colAction') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -85,21 +87,21 @@
             <td class="balance-cell">{{ acc.balance }}</td>
             <td class="center">{{ acc.nonce }}</td>
             <td class="center">
-              <button @click.stop="copy(acc.address)" class="btn btn-xs">复制地址</button>
+              <button @click.stop="copy(acc.address)" class="btn btn-xs">{{ t('copyAddress') }}</button>
             </td>
           </tr>
           <tr v-if="expandedAccount === acc.address" class="expanded-row">
             <td colspan="5">
               <div class="expand-box">
                 <div class="key-row">
-                  <span class="field-label">私钥：</span>
+                  <span class="field-label">{{ t('privateKeyLabel') }}</span>
                   <span v-if="acc.privateKey" class="mono key-text">
                     {{ showKey ? acc.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••' }}
                   </span>
-                  <span v-else class="muted">非默认账户，私钥未知</span>
+                  <span v-else class="muted">{{ t('unknownKey') }}</span>
                   <div class="key-actions" v-if="acc.privateKey">
-                    <button @click.stop="showKey = !showKey" class="btn btn-xs">{{ showKey ? '隐藏' : '显示' }}</button>
-                    <button v-if="showKey" @click.stop="copy(acc.privateKey)" class="btn btn-xs">复制</button>
+                    <button @click.stop="showKey = !showKey" class="btn btn-xs">{{ showKey ? t('hide') : t('show') }}</button>
+                    <button v-if="showKey" @click.stop="copy(acc.privateKey)" class="btn btn-xs">{{ t('copy') }}</button>
                   </div>
                 </div>
               </div>
@@ -113,21 +115,21 @@
   <!-- ==================== 区块 ==================== -->
   <div v-if="activeTab === 'blocks'" class="tab-content">
     <div class="panel-header">
-      <h2>区块列表</h2>
-      <span class="muted">共 {{ blocks.total }} 个区块</span>
+      <h2>{{ t('blockList') }}</h2>
+      <span class="muted">{{ blocksCountLabel(blocks.total) }}</span>
     </div>
 
-    <div v-if="blocks.items.length === 0" class="empty-state">暂无区块数据</div>
+    <div v-if="blocks.items.length === 0" class="empty-state">{{ t('noBlocks') }}</div>
 
     <table v-else class="table">
       <thead>
         <tr>
-          <th style="width:90px">区块号</th>
-          <th style="width:170px">时间</th>
-          <th style="width:80px">交易数</th>
-          <th style="width:120px">Gas 已用</th>
-          <th style="width:120px">Gas 限制</th>
-          <th>区块哈希</th>
+          <th style="width:90px">{{ t('colBlock') }}</th>
+          <th style="width:170px">{{ t('colTime') }}</th>
+          <th style="width:80px">{{ t('colTxCount') }}</th>
+          <th style="width:120px">{{ t('colGasUsed') }}</th>
+          <th style="width:120px">{{ t('colGasLimit') }}</th>
+          <th>{{ t('colHash') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -146,29 +148,35 @@
             <td colspan="6">
               <div class="expand-box" v-if="blockDetail[block.number]">
                 <div class="detail-grid">
-                  <div class="detail-row"><span class="field-label">父哈希</span><span class="mono">{{ blockDetail[block.number].parentHash }}</span></div>
-                  <div class="detail-row"><span class="field-label">矿工地址</span><span class="mono">{{ blockDetail[block.number].miner }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('parentHash') }}</span><span class="mono">{{ blockDetail[block.number].parentHash }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('miner') }}</span><span class="mono">{{ blockDetail[block.number].miner }}</span></div>
                 </div>
                 <div v-if="blockDetail[block.number].txDetails?.length > 0" class="inner-section">
-                  <h4>该区块交易（{{ blockDetail[block.number].txDetails.length }} 笔）</h4>
+                  <h4>{{ blockTxsLabel(blockDetail[block.number].txDetails.length) }}</h4>
                   <table class="inner-table">
                     <thead>
-                      <tr><th>哈希</th><th>发送方</th><th>接收方</th><th>金额 ETH</th><th>状态</th></tr>
+                      <tr>
+                        <th>{{ t('colTxHash') }}</th>
+                        <th>{{ t('colFrom') }}</th>
+                        <th>{{ t('colTo') }}</th>
+                        <th>{{ t('colValue') }}</th>
+                        <th>{{ t('colStatus') }}</th>
+                      </tr>
                     </thead>
                     <tbody>
                       <tr v-for="tx in blockDetail[block.number].txDetails" :key="tx.hash">
                         <td class="mono hash-short">{{ tx.hash }}</td>
                         <td class="mono hash-short">{{ tx.from }}</td>
-                        <td class="mono hash-short">{{ tx.to || '合约创建' }}</td>
+                        <td class="mono hash-short">{{ tx.to || t('contractCreation') }}</td>
                         <td>{{ tx.value }}</td>
                         <td><span class="badge" :class="statusClass(tx.status)">{{ statusLabel(tx.status) }}</span></td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
-                <div v-else class="muted" style="padding:8px 0">该区块无交易</div>
+                <div v-else class="muted" style="padding:8px 0">{{ t('noTxInBlock') }}</div>
               </div>
-              <div v-else class="expand-box muted">加载中...</div>
+              <div v-else class="expand-box muted">{{ t('loading') }}</div>
             </td>
           </tr>
         </template>
@@ -176,31 +184,31 @@
     </table>
 
     <div class="pagination">
-      <button @click="prevPage('blocks')" :disabled="blocksPage <= 0" class="btn btn-ghost btn-sm">← 上一页</button>
-      <span class="page-info">第 {{ blocksPage + 1 }} 页 / 共 {{ Math.ceil(blocks.total / 20) || 1 }} 页</span>
-      <button @click="nextPage('blocks')" :disabled="(blocksPage + 1) * 20 >= blocks.total" class="btn btn-ghost btn-sm">下一页 →</button>
+      <button @click="prevPage('blocks')" :disabled="blocksPage <= 0" class="btn btn-ghost btn-sm">{{ t('prevPage') }}</button>
+      <span class="page-info">{{ pageLabel(blocksPage + 1, Math.ceil(blocks.total / 20) || 1) }}</span>
+      <button @click="nextPage('blocks')" :disabled="(blocksPage + 1) * 20 >= blocks.total" class="btn btn-ghost btn-sm">{{ t('nextPage') }}</button>
     </div>
   </div>
 
   <!-- ==================== 交易 ==================== -->
   <div v-if="activeTab === 'transactions'" class="tab-content">
     <div class="panel-header">
-      <h2>交易记录</h2>
-      <span class="muted">共 {{ transactions.total }} 笔</span>
+      <h2>{{ t('txList') }}</h2>
+      <span class="muted">{{ txCountLabel(transactions.total) }}</span>
     </div>
 
-    <div v-if="transactions.items.length === 0" class="empty-state">暂无交易记录</div>
+    <div v-if="transactions.items.length === 0" class="empty-state">{{ t('noTx') }}</div>
 
     <table v-else class="table">
       <thead>
         <tr>
-          <th>交易哈希</th>
-          <th style="width:80px">区块号</th>
-          <th>发送方</th>
-          <th>接收方</th>
-          <th style="width:110px">金额 (ETH)</th>
-          <th style="width:100px">Gas 消耗</th>
-          <th style="width:80px">状态</th>
+          <th>{{ t('colTxHashFull') }}</th>
+          <th style="width:80px">{{ t('colBlockNum') }}</th>
+          <th>{{ t('colFrom') }}</th>
+          <th>{{ t('colTo') }}</th>
+          <th style="width:110px">{{ t('colAmount') }}</th>
+          <th style="width:100px">{{ t('colGasConsumed') }}</th>
+          <th style="width:80px">{{ t('colStatus') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -209,7 +217,7 @@
             <td class="mono hash-cell">{{ tx.hash }}</td>
             <td class="center">#{{ tx.blockNumber }}</td>
             <td class="mono hash-short">{{ tx.from }}</td>
-            <td class="mono hash-short">{{ tx.to || '合约创建' }}</td>
+            <td class="mono hash-short">{{ tx.to || t('contractCreation') }}</td>
             <td>{{ tx.value }}</td>
             <td class="center">{{ tx.gasUsed != null ? tx.gasUsed.toLocaleString() : '--' }}</td>
             <td><span class="badge" :class="statusClass(tx.status)">{{ statusLabel(tx.status) }}</span></td>
@@ -218,17 +226,17 @@
             <td colspan="7">
               <div class="expand-box">
                 <div class="detail-grid">
-                  <div class="detail-row"><span class="field-label">完整哈希</span><span class="mono">{{ tx.hash }}</span></div>
-                  <div class="detail-row"><span class="field-label">发送方</span><span class="mono">{{ tx.from }}</span></div>
-                  <div class="detail-row"><span class="field-label">接收方</span><span class="mono">{{ tx.to || '合约创建' }}</span></div>
-                  <div class="detail-row" v-if="tx.contractAddress"><span class="field-label">合约地址</span><span class="mono">{{ tx.contractAddress }}</span></div>
-                  <div class="detail-row"><span class="field-label">Gas 价格</span><span>{{ tx.gasPrice ? (parseInt(tx.gasPrice, 16) / 1e9).toFixed(4) + ' Gwei' : '--' }}</span></div>
-                  <div class="detail-row"><span class="field-label">Gas 限制</span><span>{{ tx.gas?.toLocaleString() }}</span></div>
-                  <div class="detail-row"><span class="field-label">Gas 消耗</span><span>{{ tx.gasUsed != null ? tx.gasUsed.toLocaleString() : '--' }}</span></div>
-                  <div class="detail-row"><span class="field-label">Nonce</span><span>{{ tx.nonce }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldHash') }}</span><span class="mono">{{ tx.hash }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldFrom') }}</span><span class="mono">{{ tx.from }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldTo') }}</span><span class="mono">{{ tx.to || t('contractCreation') }}</span></div>
+                  <div class="detail-row" v-if="tx.contractAddress"><span class="field-label">{{ t('fieldContract') }}</span><span class="mono">{{ tx.contractAddress }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldGasPrice') }}</span><span>{{ tx.gasPrice ? (parseInt(tx.gasPrice, 16) / 1e9).toFixed(4) + ' Gwei' : '--' }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldGasLimit') }}</span><span>{{ tx.gas?.toLocaleString() }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldGasUsed') }}</span><span>{{ tx.gasUsed != null ? tx.gasUsed.toLocaleString() : '--' }}</span></div>
+                  <div class="detail-row"><span class="field-label">{{ t('fieldNonce') }}</span><span>{{ tx.nonce }}</span></div>
                 </div>
                 <div v-if="tx.input && tx.input !== '0x'" class="input-data-section">
-                  <div class="field-label">Input Data：</div>
+                  <div class="field-label">{{ t('inputData') }}</div>
                   <div class="input-data mono">{{ tx.input }}</div>
                 </div>
               </div>
@@ -239,19 +247,19 @@
     </table>
 
     <div class="pagination">
-      <button @click="prevPage('tx')" :disabled="txPage <= 0" class="btn btn-ghost btn-sm">← 上一页</button>
-      <span class="page-info">第 {{ txPage + 1 }} 页 / 共 {{ Math.ceil(transactions.total / 50) || 1 }} 页</span>
-      <button @click="nextPage('tx')" :disabled="(txPage + 1) * 50 >= transactions.total" class="btn btn-ghost btn-sm">下一页 →</button>
+      <button @click="prevPage('tx')" :disabled="txPage <= 0" class="btn btn-ghost btn-sm">{{ t('prevPage') }}</button>
+      <span class="page-info">{{ pageLabel(txPage + 1, Math.ceil(transactions.total / 50) || 1) }}</span>
+      <button @click="nextPage('tx')" :disabled="(txPage + 1) * 50 >= transactions.total" class="btn btn-ghost btn-sm">{{ t('nextPage') }}</button>
     </div>
   </div>
 
   <!-- ==================== 合约 ==================== -->
   <div v-if="activeTab === 'contracts'" class="tab-content">
     <div class="panel-header">
-      <h2>合约</h2>
+      <h2>{{ t('contractsTab') }}</h2>
       <div class="dir-row">
-        <input v-model="artifactsDir" placeholder="artifacts 目录（留空使用默认）" class="input input-dir" />
-        <button @click="loadContracts" class="btn btn-primary btn-sm">扫描</button>
+        <input v-model="artifactsDir" :placeholder="t('artifactsPlaceholder')" class="input input-dir" />
+        <button @click="loadContracts" class="btn btn-primary btn-sm">{{ t('scan') }}</button>
       </div>
     </div>
 
@@ -259,8 +267,8 @@
       <!-- 左：合约列表 -->
       <div class="contracts-sidebar">
         <div v-if="contracts.length === 0" class="empty-state" style="padding:24px">
-          <div>未发现合约文件</div>
-          <small class="muted">请确认 artifacts 目录路径正确</small>
+          <div>{{ t('noContracts') }}</div>
+          <small class="muted">{{ t('checkDir') }}</small>
         </div>
         <div
           v-for="c in contracts" :key="c.name"
@@ -268,21 +276,21 @@
           :class="{ 'contract-active': selectedContract?.name === c.name }"
           @click="selectedContract = c">
           <div class="contract-name">{{ c.name }}</div>
-          <div class="contract-meta">{{ c.abi.length }} 个成员 · {{ c.bytecodeSize }} bytes</div>
+          <div class="contract-meta">{{ membersLabel(c.abi.length, c.bytecodeSize) }}</div>
         </div>
       </div>
 
       <!-- 右：ABI 详情 -->
       <div class="contract-detail">
         <div v-if="!selectedContract" class="empty-state" style="height:100%">
-          从左侧选择合约查看 ABI
+          {{ t('selectContract') }}
         </div>
         <div v-else>
           <h3>{{ selectedContract.name }}</h3>
           <div class="deploy-row">
             <input
               v-model="contractAddresses[selectedContract.name]"
-              placeholder="输入已部署合约地址 0x..."
+              :placeholder="t('deployedAddress')"
               class="input" />
           </div>
           <div class="abi-list">
@@ -308,21 +316,21 @@
   <!-- ==================== 日志 ==================== -->
   <div v-if="activeTab === 'logs'" class="tab-content logs-tab">
     <div class="panel-header">
-      <h2>事件日志</h2>
+      <h2>{{ t('eventLogs') }}</h2>
       <div class="panel-actions">
-        <span class="muted">{{ logs.length }} 条记录</span>
-        <button @click="logs = []" class="btn btn-ghost btn-sm">清空</button>
+        <span class="muted">{{ logsCountLabel(logs.length) }}</span>
+        <button @click="logs = []" class="btn btn-ghost btn-sm">{{ t('clearLog') }}</button>
       </div>
     </div>
 
     <div v-if="logs.length === 0" class="empty-state" style="margin-top:40px">
-      暂无事件日志，等待链上交易...
+      {{ t('noLogs') }}
     </div>
 
     <div v-else class="logs-list" ref="logsRef">
       <div v-for="log in logs" :key="log.id" class="log-item">
         <div class="log-header">
-          <span class="badge badge-blue">块 #{{ log.blockNumber }}</span>
+          <span class="badge badge-blue">#{{ log.blockNumber }}</span>
           <span class="log-addr mono">{{ log.address }}</span>
           <span class="log-tx muted mono">Tx: {{ log.transactionHash?.slice(0, 20) }}...</span>
         </div>
@@ -358,17 +366,17 @@
           v-if="node.status === 'stopped'"
           @click="startNode"
           class="btn btn-primary">
-          ▶ 启动节点
+          {{ t('startNode') }}
         </button>
         <button
           v-else-if="node.status === 'running'"
           @click="stopNode"
           class="btn btn-danger">
-          ■ 停止节点
+          {{ t('stopNode') }}
         </button>
         <button v-else class="btn" disabled>
           <span class="spinner"></span>
-          {{ node.status === 'starting' ? '启动中...' : '停止中...' }}
+          {{ node.status === 'starting' ? t('nodeStartingBtn') : t('nodeStoppingBtn') }}
         </button>
       </div>
     </div>
@@ -377,21 +385,21 @@
 
       <!-- 左：配置面板 -->
       <div class="node-config-panel">
-        <h3 class="section-title">节点配置</h3>
+        <h3 class="section-title">{{ t('nodeConfigTitle') }}</h3>
 
         <div class="config-group">
-          <div class="config-label">Hardhat 项目目录</div>
-          <input v-model="node.config.projectDir" class="input" placeholder="留空使用内置 Hardhat" :disabled="node.status !== 'stopped'" />
-          <div class="config-hint">留空使用内置版本，或填入其他 Hardhat 项目路径</div>
+          <div class="config-label">{{ t('projectDir') }}</div>
+          <input v-model="node.config.projectDir" class="input" :placeholder="t('projectDirPlaceholder')" :disabled="node.status !== 'stopped'" />
+          <div class="config-hint">{{ t('projectDirHint') }}</div>
         </div>
 
         <div class="config-row">
           <div class="config-group">
-            <div class="config-label">监听端口</div>
+            <div class="config-label">{{ t('listenPort') }}</div>
             <input v-model.number="node.config.port" type="number" class="input" :disabled="node.status !== 'stopped'" />
           </div>
           <div class="config-group">
-            <div class="config-label">监听地址</div>
+            <div class="config-label">{{ t('listenAddr') }}</div>
             <input v-model="node.config.hostname" class="input" :disabled="node.status !== 'stopped'" />
           </div>
         </div>
@@ -404,22 +412,22 @@
         <!-- 折叠：账户配置 -->
         <div class="config-section">
           <div class="config-section-hd" @click="showAdvanced = !showAdvanced">
-            <span>账户配置</span>
+            <span>{{ t('accountConfig') }}</span>
             <span class="chevron" :class="{ open: showAdvanced }">›</span>
           </div>
           <div v-if="showAdvanced" class="config-section-bd">
             <div class="config-row">
               <div class="config-group">
-                <div class="config-label">账户数量</div>
+                <div class="config-label">{{ t('accountCount') }}</div>
                 <input v-model.number="node.config.accountCount" type="number" class="input" :disabled="node.status !== 'stopped'" />
               </div>
               <div class="config-group">
-                <div class="config-label">初始余额 (ETH)</div>
+                <div class="config-label">{{ t('initialBalance') }}</div>
                 <input v-model="node.config.initialBalance" type="text" class="input" :disabled="node.status !== 'stopped'" />
               </div>
             </div>
             <div class="config-group">
-              <div class="config-label">助记词 (Mnemonic)</div>
+              <div class="config-label">{{ t('mnemonic') }}</div>
               <input v-model="node.config.mnemonic" class="input mono" :disabled="node.status !== 'stopped'" />
             </div>
           </div>
@@ -428,28 +436,28 @@
         <!-- 折叠：Fork 配置 -->
         <div class="config-section">
           <div class="config-section-hd" @click="showFork = !showFork">
-            <span>Fork 配置</span>
+            <span>{{ t('forkConfig') }}</span>
             <span class="chevron" :class="{ open: showFork }">›</span>
           </div>
           <div v-if="showFork" class="config-section-bd">
             <div class="config-group">
-              <div class="config-label">Fork 源 RPC URL</div>
+              <div class="config-label">{{ t('forkUrl') }}</div>
               <input v-model="node.config.fork" class="input" placeholder="https://mainnet.infura.io/v3/..." :disabled="node.status !== 'stopped'" />
             </div>
             <div class="config-group">
-              <div class="config-label">Fork 起始区块（留空=最新）</div>
-              <input v-model="node.config.forkBlockNumber" class="input" placeholder="可选" :disabled="node.status !== 'stopped'" />
+              <div class="config-label">{{ t('forkBlock') }}</div>
+              <input v-model="node.config.forkBlockNumber" class="input" :placeholder="t('optional')" :disabled="node.status !== 'stopped'" />
             </div>
           </div>
         </div>
 
         <!-- 运行中的账户列表 -->
         <div v-if="node.status === 'running' && node.accounts.length > 0" class="node-accounts">
-          <h3 class="section-title">运行账户</h3>
+          <h3 class="section-title">{{ t('runningAccounts') }}</h3>
           <div v-for="acc in node.accounts" :key="acc.address" class="node-acc-row">
             <span class="muted acc-idx">#{{ acc.index }}</span>
             <span class="mono acc-addr">{{ acc.address }}</span>
-            <button @click="copy(acc.privateKey || acc.address)" class="btn btn-xs">复制私钥</button>
+            <button @click="copy(acc.privateKey || acc.address)" class="btn btn-xs">{{ t('copyKey') }}</button>
           </div>
         </div>
       </div>
@@ -457,11 +465,11 @@
       <!-- 右：控制台 -->
       <div class="node-console-panel">
         <div class="console-header">
-          <span>控制台输出</span>
-          <button @click="nodeLogs = []" class="btn btn-ghost btn-xs">清空</button>
+          <span>{{ t('consolePanelTitle') }}</span>
+          <button @click="nodeLogs = []" class="btn btn-ghost btn-xs">{{ t('clearLog') }}</button>
         </div>
         <div class="console-body" ref="consoleRef">
-          <div v-if="nodeLogs.length === 0" class="console-empty">等待节点启动...</div>
+          <div v-if="nodeLogs.length === 0" class="console-empty">{{ t('waitingNode') }}</div>
           <div
             v-for="(entry, i) in nodeLogs" :key="i"
             class="console-line"
@@ -478,21 +486,21 @@
   <div v-if="showSnapshotModal" class="modal-overlay" @click.self="showSnapshotModal = false">
     <div class="modal">
       <div class="modal-header">
-        <h3>网络快照管理</h3>
+        <h3>{{ t('snapshotTitle') }}</h3>
         <button @click="showSnapshotModal = false" class="btn-close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="muted">快照保存当前链状态，可随时回滚。</p>
-        <button @click="createSnapshot" class="btn btn-primary">创建快照</button>
-        <div v-if="snapshots.length === 0" class="empty-state" style="margin:16px 0">暂无快照</div>
+        <p class="muted">{{ t('snapshotDesc') }}</p>
+        <button @click="createSnapshot" class="btn btn-primary">{{ t('createSnapshot') }}</button>
+        <div v-if="snapshots.length === 0" class="empty-state" style="margin:16px 0">{{ t('noSnapshots') }}</div>
         <div v-else class="snapshot-list">
           <div v-for="snap in snapshots" :key="snap.id" class="snapshot-item">
             <div>
               <span class="badge badge-blue">ID: {{ snap.id }}</span>
               <span class="muted" style="margin-left:8px">{{ snap.time }}</span>
-              <span class="muted" style="margin-left:8px">块 #{{ snap.blockNumber }}</span>
+              <span class="muted" style="margin-left:8px">#{{ snap.blockNumber }}</span>
             </div>
-            <button @click="revertSnapshot(snap)" class="btn btn-sm btn-danger">回滚</button>
+            <button @click="revertSnapshot(snap)" class="btn btn-sm btn-danger">{{ t('revert') }}</button>
           </div>
         </div>
       </div>
@@ -503,19 +511,19 @@
   <div v-if="showTimeModal" class="modal-overlay" @click.self="showTimeModal = false">
     <div class="modal">
       <div class="modal-header">
-        <h3>时间控制</h3>
+        <h3>{{ t('timeTitle') }}</h3>
         <button @click="showTimeModal = false" class="btn-close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="muted">快进区块时间戳，不影响系统时钟。</p>
+        <p class="muted">{{ t('timeDesc') }}</p>
         <div class="form-row">
-          <label>快进秒数：</label>
+          <label>{{ t('timeLabel') }}</label>
           <input v-model.number="timeAdvance" type="number" min="1" class="input" placeholder="3600" style="width:120px" />
-          <span class="muted">约 {{ formatDuration(timeAdvance) }}</span>
+          <span class="muted">≈ {{ formatDuration(timeAdvance) }}</span>
         </div>
         <div class="modal-actions">
-          <button @click="advanceTime" class="btn btn-primary">确认快进</button>
-          <button @click="showTimeModal = false" class="btn btn-ghost">取消</button>
+          <button @click="advanceTime" class="btn btn-primary">{{ t('confirm') }}</button>
+          <button @click="showTimeModal = false" class="btn btn-ghost">{{ t('cancel') }}</button>
         </div>
       </div>
     </div>

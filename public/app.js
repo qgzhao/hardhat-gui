@@ -1,17 +1,133 @@
 const { createApp } = Vue
 
+// ============================================================
+// 国际化文本 / i18n strings
+// ============================================================
+const I18N = {
+  zh: {
+    connected: '已连接', disconnected: '未连接', latestBlock: '最新区块',
+    mine: '⛏ 出块', automine: '自动出块', snapshot: '📸 快照', timeCtrl: '⏩ 时间',
+    tab_node: '节点', tab_accounts: '账户', tab_blocks: '区块',
+    tab_transactions: '交易', tab_contracts: '合约', tab_logs: '日志',
+    accountList: '账户列表', refresh: '↺ 刷新',
+    notConnected: '⚠ 未连接节点，请启动 npx hardhat node',
+    loading: '加载中...',
+    colIndex: '#', colAddress: '地址', colBalance: '余额 (ETH)', colNonce: 'Nonce', colAction: '操作',
+    copyAddress: '复制地址', privateKeyLabel: '私钥：', unknownKey: '非默认账户，私钥未知',
+    hide: '隐藏', show: '显示', copy: '复制',
+    blockList: '区块列表', noBlocks: '暂无区块数据',
+    colBlock: '区块号', colTime: '时间', colTxCount: '交易数',
+    colGasUsed: 'Gas 已用', colGasLimit: 'Gas 限制', colHash: '区块哈希',
+    parentHash: '父哈希', miner: '矿工地址',
+    colTxHash: '哈希', colFrom: '发送方', colTo: '接收方', colValue: '金额 ETH', colStatus: '状态',
+    contractCreation: '合约创建', noTxInBlock: '该区块无交易',
+    prevPage: '← 上一页', nextPage: '下一页 →',
+    txList: '交易记录', noTx: '暂无交易记录',
+    colTxHashFull: '交易哈希', colBlockNum: '区块号', colAmount: '金额 (ETH)', colGasConsumed: 'Gas 消耗',
+    fieldHash: '完整哈希', fieldFrom: '发送方', fieldTo: '接收方', fieldContract: '合约地址',
+    fieldGasPrice: 'Gas 价格', fieldGasLimit: 'Gas 限制', fieldGasUsed: 'Gas 消耗', fieldNonce: 'Nonce',
+    inputData: 'Input Data：',
+    contractsTab: '合约', artifactsPlaceholder: 'artifacts 目录（留空使用默认）', scan: '扫描',
+    noContracts: '未发现合约文件', checkDir: '请确认 artifacts 目录路径正确',
+    selectContract: '从左侧选择合约查看 ABI', deployedAddress: '输入已部署合约地址 0x...',
+    eventLogs: '事件日志', clearLog: '清空', noLogs: '暂无事件日志，等待链上交易...',
+    startNode: '▶ 启动节点', stopNode: '■ 停止节点',
+    nodeConfigTitle: '节点配置', projectDir: 'Hardhat 项目目录',
+    projectDirPlaceholder: '留空使用内置 Hardhat',
+    projectDirHint: '留空使用内置版本，或填入其他 Hardhat 项目路径',
+    listenPort: '监听端口', listenAddr: '监听地址',
+    accountConfig: '账户配置', accountCount: '账户数量',
+    initialBalance: '初始余额 (ETH)', mnemonic: '助记词 (Mnemonic)',
+    forkConfig: 'Fork 配置', forkUrl: 'Fork 源 RPC URL',
+    forkBlock: 'Fork 起始区块（留空=最新）', optional: '可选',
+    runningAccounts: '运行账户', copyKey: '复制私钥',
+    consolePanelTitle: '控制台输出', waitingNode: '等待节点启动...',
+    statusStopped: '已停止', statusStarting: '启动中', statusRunning: '运行中', statusStopping: '停止中',
+    nodeStartingBtn: '启动中...', nodeStoppingBtn: '停止中...',
+    snapshotTitle: '网络快照管理', snapshotDesc: '快照保存当前链状态，可随时回滚。',
+    createSnapshot: '创建快照', noSnapshots: '暂无快照', revert: '回滚',
+    timeTitle: '时间控制', timeDesc: '快进区块时间戳，不影响系统时钟。',
+    timeLabel: '快进秒数：', confirm: '确认快进', cancel: '取消',
+    txSuccess: '成功', txFailed: '失败', txPending: '待确认',
+    abiFunction: '函数', abiEvent: '事件', abiConstructor: '构造',
+    abiReceive: '接收', abiFallback: '回退', abiError: '错误',
+    toastCopied: '已复制到剪贴板', toastCopyFail: '复制失败，请手动复制',
+    toastMined: '出块成功', toastAutomineOn: '自动出块已开启', toastAutomineOff: '自动出块已关闭',
+    toastNodeStartSent: '节点启动指令已发送', toastNodeStopSent: '停止指令已发送',
+    toastInvalidSecs: '请输入有效秒数', toastReqFailed: '请求失败：',
+    mineTitle: '立即挖出一个区块', automineTitle: '开启后每笔交易自动出块',
+  },
+  en: {
+    connected: 'Connected', disconnected: 'Disconnected', latestBlock: 'Latest Block',
+    mine: '⛏ Mine', automine: 'Automine', snapshot: '📸 Snapshot', timeCtrl: '⏩ Time',
+    tab_node: 'Node', tab_accounts: 'Accounts', tab_blocks: 'Blocks',
+    tab_transactions: 'Transactions', tab_contracts: 'Contracts', tab_logs: 'Logs',
+    accountList: 'Accounts', refresh: '↺ Refresh',
+    notConnected: '⚠ Not connected. Start npx hardhat node first.',
+    loading: 'Loading...',
+    colIndex: '#', colAddress: 'Address', colBalance: 'Balance (ETH)', colNonce: 'Nonce', colAction: 'Action',
+    copyAddress: 'Copy Address', privateKeyLabel: 'Private Key:', unknownKey: 'Non-default account — private key unknown',
+    hide: 'Hide', show: 'Show', copy: 'Copy',
+    blockList: 'Blocks', noBlocks: 'No blocks yet',
+    colBlock: 'Block', colTime: 'Time', colTxCount: 'Txns',
+    colGasUsed: 'Gas Used', colGasLimit: 'Gas Limit', colHash: 'Hash',
+    parentHash: 'Parent Hash', miner: 'Miner',
+    colTxHash: 'Hash', colFrom: 'From', colTo: 'To', colValue: 'Value ETH', colStatus: 'Status',
+    contractCreation: 'Contract Creation', noTxInBlock: 'No transactions in this block',
+    prevPage: '← Prev', nextPage: 'Next →',
+    txList: 'Transactions', noTx: 'No transactions yet',
+    colTxHashFull: 'Tx Hash', colBlockNum: 'Block', colAmount: 'Value (ETH)', colGasConsumed: 'Gas Used',
+    fieldHash: 'Hash', fieldFrom: 'From', fieldTo: 'To', fieldContract: 'Contract Address',
+    fieldGasPrice: 'Gas Price', fieldGasLimit: 'Gas Limit', fieldGasUsed: 'Gas Used', fieldNonce: 'Nonce',
+    inputData: 'Input Data:',
+    contractsTab: 'Contracts', artifactsPlaceholder: 'Artifacts dir (blank = default)', scan: 'Scan',
+    noContracts: 'No contracts found', checkDir: 'Please verify the artifacts directory path',
+    selectContract: 'Select a contract on the left to view its ABI',
+    deployedAddress: 'Enter deployed contract address 0x...',
+    eventLogs: 'Event Logs', clearLog: 'Clear', noLogs: 'No event logs. Waiting for on-chain activity...',
+    startNode: '▶ Start Node', stopNode: '■ Stop Node',
+    nodeConfigTitle: 'Node Configuration', projectDir: 'Hardhat Project Directory',
+    projectDirPlaceholder: 'Leave blank for built-in Hardhat',
+    projectDirHint: 'Leave blank for built-in Hardhat, or enter another project path',
+    listenPort: 'Port', listenAddr: 'Hostname',
+    accountConfig: 'Account Settings', accountCount: 'Account Count',
+    initialBalance: 'Initial Balance (ETH)', mnemonic: 'Mnemonic',
+    forkConfig: 'Fork Settings', forkUrl: 'Fork RPC URL',
+    forkBlock: 'Fork Block Number (blank = latest)', optional: 'optional',
+    runningAccounts: 'Running Accounts', copyKey: 'Copy Key',
+    consolePanelTitle: 'Console Output', waitingNode: 'Waiting for node to start...',
+    statusStopped: 'Stopped', statusStarting: 'Starting', statusRunning: 'Running', statusStopping: 'Stopping',
+    nodeStartingBtn: 'Starting...', nodeStoppingBtn: 'Stopping...',
+    snapshotTitle: 'Snapshot Manager', snapshotDesc: 'Snapshots save the chain state and can be reverted at any time.',
+    createSnapshot: 'Create Snapshot', noSnapshots: 'No snapshots', revert: 'Revert',
+    timeTitle: 'Time Control', timeDesc: 'Advance the block timestamp without affecting the system clock.',
+    timeLabel: 'Seconds to advance:', confirm: 'Confirm', cancel: 'Cancel',
+    txSuccess: 'Success', txFailed: 'Failed', txPending: 'Pending',
+    abiFunction: 'function', abiEvent: 'event', abiConstructor: 'constructor',
+    abiReceive: 'receive', abiFallback: 'fallback', abiError: 'error',
+    toastCopied: 'Copied to clipboard', toastCopyFail: 'Copy failed — please copy manually',
+    toastMined: 'Block mined', toastAutomineOn: 'Automine enabled', toastAutomineOff: 'Automine disabled',
+    toastNodeStartSent: 'Node start command sent', toastNodeStopSent: 'Stop command sent',
+    toastInvalidSecs: 'Please enter a valid number of seconds', toastReqFailed: 'Request failed: ',
+    mineTitle: 'Mine an empty block immediately', automineTitle: 'Auto-mine a block for every transaction',
+  }
+}
+
 createApp({
   data() {
     return {
+      // 语言
+      lang: localStorage.getItem('hh-gui-lang') || 'zh',
+
       // 标签页
       activeTab: 'accounts',
       tabs: [
-        { id: 'node',         label: '节点' },
-        { id: 'accounts',     label: '账户' },
-        { id: 'blocks',       label: '区块' },
-        { id: 'transactions', label: '交易' },
-        { id: 'contracts',    label: '合约' },
-        { id: 'logs',         label: '日志' }
+        { id: 'node' },
+        { id: 'accounts' },
+        { id: 'blocks' },
+        { id: 'transactions' },
+        { id: 'contracts' },
+        { id: 'logs' }
       ],
 
       // 网络状态
@@ -36,7 +152,7 @@ createApp({
       expandedBlock:   null,
       expandedTx:      null,
       showKey:         false,
-      blockDetail:     {},        // blockNumber => 区块详情
+      blockDetail:     {},
 
       // 合约
       selectedContract:   null,
@@ -47,7 +163,7 @@ createApp({
       automine:    true,
       timeAdvance: 3600,
 
-      // Modal 显示
+      // Modal
       showSnapshotModal: false,
       showTimeModal:     false,
 
@@ -87,6 +203,7 @@ createApp({
   },
 
   mounted() {
+    document.documentElement.lang = this.lang === 'zh' ? 'zh-CN' : 'en'
     this.initSSE()
     this.loadInitialData()
   },
@@ -98,7 +215,11 @@ createApp({
 
   computed: {
     nodeStatusLabel() {
-      return { stopped: '已停止', starting: '启动中', running: '运行中', stopping: '停止中' }[this.node.status] || '--'
+      const map = {
+        stopped: 'statusStopped', starting: 'statusStarting',
+        running: 'statusRunning', stopping: 'statusStopping'
+      }
+      return this.t(map[this.node.status] || 'statusStopped')
     },
     nodeStatusClass() {
       return { stopped: 'count-gray', starting: 'count-yellow', running: 'count-green', stopping: 'count-yellow' }[this.node.status] || ''
@@ -109,6 +230,39 @@ createApp({
   },
 
   methods: {
+
+    // ==============================
+    // 国际化
+    // ==============================
+    t(key) {
+      return I18N[this.lang]?.[key] ?? key
+    },
+
+    toggleLang() {
+      this.lang = this.lang === 'zh' ? 'en' : 'zh'
+      localStorage.setItem('hh-gui-lang', this.lang)
+      document.documentElement.lang = this.lang === 'zh' ? 'zh-CN' : 'en'
+    },
+
+    // 带变量的本地化辅助方法
+    blocksCountLabel(n) {
+      return this.lang === 'zh' ? `共 ${n} 个区块` : `${n} block${n !== 1 ? 's' : ''}`
+    },
+    txCountLabel(n) {
+      return this.lang === 'zh' ? `共 ${n} 笔` : `${n} txn${n !== 1 ? 's' : ''}`
+    },
+    logsCountLabel(n) {
+      return this.lang === 'zh' ? `${n} 条记录` : `${n} record${n !== 1 ? 's' : ''}`
+    },
+    blockTxsLabel(n) {
+      return this.lang === 'zh' ? `该区块交易（${n} 笔）` : `${n} transaction${n !== 1 ? 's' : ''} in block`
+    },
+    pageLabel(page, total) {
+      return this.lang === 'zh' ? `第 ${page} 页 / 共 ${total} 页` : `Page ${page} of ${total}`
+    },
+    membersLabel(n, b) {
+      return this.lang === 'zh' ? `${n} 个成员 · ${b} bytes` : `${n} members · ${b} bytes`
+    },
 
     // ==============================
     // 初始化
@@ -161,7 +315,6 @@ createApp({
           this.transactions.total++
           if (this.transactions.items.length > 500) this.transactions.items.pop()
         } else {
-          // 更新状态（如从 pending → success）
           Object.assign(this.transactions.items[idx], tx)
         }
       })
@@ -182,14 +335,12 @@ createApp({
         this.status.connected = false
       }
 
-      // 节点状态（通过主 SSE 推送）
       this.eventSource.addEventListener('nodeStatus', e => {
         const data = JSON.parse(e.data)
         this.applyNodeStatus(data)
       })
     },
 
-    // 节点控制台 SSE（独立连接，tab 切换时建立）
     initConsoleSse() {
       if (this.consoleSse) return
       this.consoleSse = new EventSource('/api/node/console')
@@ -228,12 +379,12 @@ createApp({
       const res = await this.post('/api/node/start', this.node.config)
       if (res === null) return
       this.initConsoleSse()
-      this.showToast('节点启动指令已发送', 'info')
+      this.showToast(this.t('toastNodeStartSent'), 'info')
     },
 
     async stopNode() {
       const res = await this.post('/api/node/stop', {})
-      if (res !== null) this.showToast('停止指令已发送', 'info')
+      if (res !== null) this.showToast(this.t('toastNodeStopSent'), 'info')
     },
 
     // ==============================
@@ -330,15 +481,15 @@ createApp({
     // ==============================
     async mine() {
       const res = await this.rpcCall('evm_mine', [])
-      if (res !== null) this.showToast('出块成功', 'success')
+      if (res !== null) this.showToast(this.t('toastMined'), 'success')
     },
 
     async toggleAutomine() {
       const res = await this.rpcCall('evm_setAutomine', [this.automine])
       if (res !== null) {
-        this.showToast(`自动出块已${this.automine ? '开启' : '关闭'}`, 'success')
+        this.showToast(this.t(this.automine ? 'toastAutomineOn' : 'toastAutomineOff'), 'success')
       } else {
-        this.automine = !this.automine // 失败则回滚
+        this.automine = !this.automine
       }
     },
 
@@ -347,22 +498,26 @@ createApp({
       if (snapshotId !== null) {
         this.snapshots.push({
           id: snapshotId,
-          time: new Date().toLocaleString('zh-CN'),
+          time: new Date().toLocaleString(this.lang === 'zh' ? 'zh-CN' : 'en-US'),
           blockNumber: this.status.latestBlock
         })
-        this.showToast(`快照 ${snapshotId} 创建成功`, 'success')
+        const msg = this.lang === 'zh'
+          ? `快照 ${snapshotId} 创建成功`
+          : `Snapshot ${snapshotId} created`
+        this.showToast(msg, 'success')
       }
     },
 
     async revertSnapshot(snap) {
       const ok = await this.rpcCall('evm_revert', [snap.id])
       if (ok) {
-        // 回滚后删除此快照及之后的所有快照
         const idx = this.snapshots.indexOf(snap)
         this.snapshots.splice(idx)
-        this.showToast(`已回滚到快照 ${snap.id}`, 'success')
+        const msg = this.lang === 'zh'
+          ? `已回滚到快照 ${snap.id}`
+          : `Reverted to snapshot ${snap.id}`
+        this.showToast(msg, 'success')
         this.showSnapshotModal = false
-        // 刷新数据
         this.blocksPage = 0
         this.txPage = 0
         await Promise.allSettled([
@@ -376,11 +531,14 @@ createApp({
 
     async advanceTime() {
       const secs = parseInt(this.timeAdvance) || 0
-      if (secs <= 0) return this.showToast('请输入有效秒数', 'error')
+      if (secs <= 0) return this.showToast(this.t('toastInvalidSecs'), 'error')
       const res = await this.rpcCall('evm_increaseTime', [secs])
       if (res !== null) {
         this.showTimeModal = false
-        this.showToast(`时间已快进 ${this.formatDuration(secs)}`, 'success')
+        const msg = this.lang === 'zh'
+          ? `时间已快进 ${this.formatDuration(secs)}`
+          : `Time advanced by ${this.formatDuration(secs)}`
+        this.showToast(msg, 'success')
       }
     },
 
@@ -393,7 +551,7 @@ createApp({
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return await res.json()
       } catch (err) {
-        this.showToast('请求失败：' + err.message, 'error')
+        this.showToast(this.t('toastReqFailed') + err.message, 'error')
         return null
       }
     },
@@ -436,9 +594,9 @@ createApp({
     async copy(text) {
       try {
         await navigator.clipboard.writeText(text)
-        this.showToast('已复制到剪贴板', 'success')
+        this.showToast(this.t('toastCopied'), 'success')
       } catch {
-        this.showToast('复制失败，请手动复制', 'error')
+        this.showToast(this.t('toastCopyFail'), 'error')
       }
     },
 
@@ -456,23 +614,30 @@ createApp({
     // ==============================
     formatTime(ts) {
       if (!ts) return '--'
-      return new Date(ts * 1000).toLocaleString('zh-CN', {
+      return new Date(ts * 1000).toLocaleString(this.lang === 'zh' ? 'zh-CN' : 'en-US', {
         month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit'
       })
     },
 
     formatDuration(secs) {
-      if (!secs || secs <= 0) return '0 秒'
+      if (!secs || secs <= 0) return this.lang === 'zh' ? '0 秒' : '0s'
       const s = parseInt(secs)
-      if (s < 60)   return `${s} 秒`
-      if (s < 3600) return `${Math.floor(s / 60)} 分 ${s % 60} 秒`
+      if (this.lang === 'en') {
+        if (s < 60)    return `${s}s`
+        if (s < 3600)  return `${Math.floor(s / 60)}m ${s % 60}s`
+        if (s < 86400) return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+        return `${Math.floor(s / 86400)}d`
+      }
+      if (s < 60)    return `${s} 秒`
+      if (s < 3600)  return `${Math.floor(s / 60)} 分 ${s % 60} 秒`
       if (s < 86400) return `${Math.floor(s / 3600)} 小时 ${Math.floor((s % 3600) / 60)} 分`
       return `${Math.floor(s / 86400)} 天`
     },
 
     statusLabel(status) {
-      return { success: '成功', failed: '失败', pending: '待确认' }[status] || '--'
+      const map = { success: 'txSuccess', failed: 'txFailed', pending: 'txPending' }
+      return this.t(map[status]) || '--'
     },
 
     statusClass(status) {
@@ -480,14 +645,11 @@ createApp({
     },
 
     abiTypeLabel(type) {
-      return {
-        function:    '函数',
-        event:       '事件',
-        constructor: '构造',
-        receive:     '接收',
-        fallback:    '回退',
-        error:       '错误'
-      }[type] || type
+      const map = {
+        function: 'abiFunction', event: 'abiEvent', constructor: 'abiConstructor',
+        receive: 'abiReceive', fallback: 'abiFallback', error: 'abiError'
+      }
+      return this.t(map[type] || type)
     }
   }
 }).mount('#app')
