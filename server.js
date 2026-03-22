@@ -1,0 +1,480 @@
+import express from 'express'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+const app = express()
+app.use(express.json())
+app.use(express.static(join(__dirname, 'public')))
+
+// ============ 配置 ============
+const CONFIG = {
+  rpcUrl: process.env.RPC_URL || 'http://127.0.0.1:8545',
+  port: parseInt(process.env.PORT || '3000'),
+  artifactsDir: process.env.ARTIFACTS_DIR || join(__dirname, '..', 'dapp', 'artifacts'),
+  maxBlocks: 200,
+  maxTransactions: 500,
+  maxLogs: 500,
+  pollInterval: 1000
+}
+
+// ============ Hardhat 默认账户私钥 ============
+// 助记词：test test test test test test test test test test test junk
+const HARDHAT_DEFAULT_KEYS = {
+  '0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266': '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+  '0x70997970c51812dc3a010c7d01b50e0d17dc79c8': '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
+  '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc': '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
+  '0x90f79bf6eb2c4f870365e785982e1f101e93b906': '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6',
+  '0x15d34aaf54267db7d7c367839aaf71a00a2c6a65': '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926b',
+  '0x9965507d1a55bcc2695c58ba16fb37d819b0a4dc': '0x8b3a350cf5c34c9194ca85829a2df0ec3153be0318b5e2d3348e872092edffba',
+  '0x976ea74026e726554db657fa54763abd0c3a0aa9': '0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e',
+  '0x14dc79964da2c08b23698b3d3cc7ca32193d9955': '0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356',
+  '0x23618e81e3f5cdf7f54c3d65f7fbc0abf5b21e8f': '0xdbda1821b80551c9d65939329250132c444d57b8afff8ddb25e27e4c47ffe29d',
+  '0xa0ee7a142d267c1f36714e4a8f75612f20a79720': '0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6',
+  '0xbcd4042de499d14e55001ccbb24a551f3b954096': '0xf214f2b2cd398c806f84e317254e0f0b801d0643303237d97a22a48e01628897',
+  '0x71be63f3384f5fb98995898a86b02fb2426c5788': '0x701b615bbdfb9de65240bc28bd21bbc0d996645a3dd57e7b12bc2bdf6f192c82',
+  '0xfabb0ac9d68b0b445fb7357272ff202c5651694a': '0xa267530f49f8280200edf313ee7af6b827f2a8bce2897751d06a843f644967b2',
+  '0x1cbd3b2770909d4e10f157cabc84c7264073c9ec': '0x47c99abed3324a2707c28affff1267e45918ec8c3f20b8aa892e8b065d2942dd',
+  '0xdf3e18d64bc6a983f673ab319ccae4f1a57c7097': '0xc526ee95bf44d8fc405a158bb884d9d1238d99f0612e9f33d006bb0789009aaa',
+  '0xcd3b766ccdd6ae721141f452c550ca635964ce71': '0x8166f546bab6da521a8369cab06c5d2b9e46670292d85c875ee9ec20e84ffb61',
+  '0x2546bcd3c84621e976d8185a91a922ae77ecec30': '0x0ea6c44ac03bff858b476bba28179e306548a1d29534558bc20e0dc04c03b0dc7',
+  '0xbda5747bfd65f08deb54cb465eb87d40e51b197e': '0x689af8efa8c651a91ad287602527f3af2fe9f6501a7ac4b061667b5a93e037fd',
+  '0xdd2fd4581271e230360230f9337d5c0430bf44c0': '0xde9be858da4a475276426320d5e9262ecfc3ba460bfac56360bfa6c4c28b4ee0',
+  '0x8626f6940e2eb28930efb4cef49b2d1f2c9c1199': '0xdf57089febbacf7ba0bc227dafbffa9fc08a93fdc68e1e42411a14efcf23656e'
+}
+
+// ============ 内存缓存 ============
+const cache = {
+  connected: false,
+  networkInfo: { chainId: null, clientVersion: null, latestBlock: -1 },
+  accounts: [],
+  blocks: [],
+  transactions: new Map(), // hash => tx 对象（保留插入顺序）
+  logs: [],
+}
+
+// ============ SSE 客户端管理 ============
+const sseClients = new Set()
+
+function broadcast(event, data) {
+  const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+  for (const res of sseClients) {
+    try { res.write(msg) } catch { sseClients.delete(res) }
+  }
+}
+
+// ============ JSON-RPC 工具 ============
+async function rpc(method, params = []) {
+  const res = await fetch(CONFIG.rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
+    signal: AbortSignal.timeout(8000)
+  })
+  const json = await res.json()
+  if (json.error) throw new Error(json.error.message)
+  return json.result
+}
+
+function hexToDec(hex) {
+  return hex ? parseInt(hex, 16) : 0
+}
+
+function weiToEth(weiHex) {
+  if (!weiHex || weiHex === '0x0') return '0.0000'
+  try {
+    const wei = BigInt(weiHex)
+    const eth = Number(wei) / 1e18
+    return eth.toFixed(4)
+  } catch {
+    return '0.0000'
+  }
+}
+
+// ============ 数据获取 ============
+async function fetchAccounts() {
+  const addrs = await rpc('eth_accounts')
+  const result = []
+  await Promise.all(addrs.map(async addr => {
+    const [balance, nonceHex] = await Promise.all([
+      rpc('eth_getBalance', [addr, 'latest']),
+      rpc('eth_getTransactionCount', [addr, 'latest'])
+    ])
+    result.push({
+      address: addr,
+      balance: weiToEth(balance),
+      balanceWei: balance,
+      nonce: hexToDec(nonceHex),
+      privateKey: HARDHAT_DEFAULT_KEYS[addr.toLowerCase()] || null
+    })
+  }))
+  // 按原始顺序排列
+  cache.accounts = addrs.map(a => result.find(r => r.address === a))
+  return cache.accounts
+}
+
+async function fetchBlock(numOrTag) {
+  const tag = typeof numOrTag === 'number'
+    ? '0x' + numOrTag.toString(16)
+    : numOrTag
+  const block = await rpc('eth_getBlockByNumber', [tag, true])
+  if (!block) return null
+
+  const formatted = {
+    number: hexToDec(block.number),
+    hash: block.hash,
+    parentHash: block.parentHash,
+    timestamp: hexToDec(block.timestamp),
+    gasUsed: hexToDec(block.gasUsed),
+    gasLimit: hexToDec(block.gasLimit),
+    miner: block.miner,
+    transactions: block.transactions?.length || 0,
+    txList: []
+  }
+
+  // 处理交易
+  if (Array.isArray(block.transactions)) {
+    for (const tx of block.transactions) {
+      if (typeof tx !== 'object' || !tx.hash) continue
+      formatted.txList.push(tx.hash)
+
+      const txData = {
+        hash: tx.hash,
+        from: tx.from,
+        to: tx.to,
+        value: weiToEth(tx.value),
+        valueWei: tx.value,
+        gasPrice: tx.gasPrice,
+        gas: hexToDec(tx.gas),
+        nonce: hexToDec(tx.nonce),
+        input: tx.input,
+        blockNumber: hexToDec(tx.blockNumber),
+        transactionIndex: hexToDec(tx.transactionIndex),
+        status: 'pending',
+        gasUsed: null,
+        contractAddress: null
+      }
+
+      // 获取收据
+      try {
+        const receipt = await rpc('eth_getTransactionReceipt', [tx.hash])
+        if (receipt) {
+          txData.status = hexToDec(receipt.status) === 1 ? 'success' : 'failed'
+          txData.gasUsed = hexToDec(receipt.gasUsed)
+          txData.contractAddress = receipt.contractAddress
+
+          // 收集事件日志
+          if (Array.isArray(receipt.logs)) {
+            for (const log of receipt.logs) {
+              const logData = {
+                id: `${log.transactionHash}-${log.logIndex}`,
+                blockNumber: hexToDec(log.blockNumber),
+                transactionHash: log.transactionHash,
+                address: log.address,
+                topics: log.topics,
+                data: log.data,
+                logIndex: hexToDec(log.logIndex)
+              }
+              if (!cache.logs.find(l => l.id === logData.id)) {
+                cache.logs.unshift(logData)
+                if (cache.logs.length > CONFIG.maxLogs) cache.logs.pop()
+                broadcast('log', logData)
+              }
+            }
+          }
+        }
+      } catch { /* 收据获取失败不影响主流程 */ }
+
+      if (!cache.transactions.has(tx.hash)) {
+        cache.transactions.set(tx.hash, txData)
+        broadcast('transaction', txData)
+      }
+    }
+  }
+
+  return formatted
+}
+
+// ============ 轮询主循环 ============
+async function pollBlocks() {
+  try {
+    const latestHex = await rpc('eth_blockNumber')
+    const latest = hexToDec(latestHex)
+
+    // 首次连接或断线重连时：强制重新读取 Chain ID
+    // （节点可能已用不同的 --chain-id 重启）
+    if (!cache.connected) {
+      cache.connected = true
+      const [chainIdHex, clientVersion] = await Promise.all([
+        rpc('eth_chainId'),
+        rpc('web3_clientVersion').catch(() => 'Hardhat')
+      ])
+      const newChainId = hexToDec(chainIdHex)
+      // Chain ID 变化时清空旧链的历史数据
+      if (cache.networkInfo.chainId !== null && cache.networkInfo.chainId !== newChainId) {
+        cache.blocks = []
+        cache.transactions.clear()
+        cache.logs = []
+        cache.networkInfo.latestBlock = -1
+      }
+      cache.networkInfo.chainId = newChainId
+      cache.networkInfo.clientVersion = clientVersion
+      await fetchAccounts()
+      broadcast('status', {
+        connected: true,
+        chainId: cache.networkInfo.chainId,
+        clientVersion: cache.networkInfo.clientVersion,
+        latestBlock: latest,
+        rpcUrl: CONFIG.rpcUrl
+      })
+    }
+
+    // 同步新区块
+    const start = cache.networkInfo.latestBlock + 1
+    for (let i = start; i <= latest; i++) {
+      const block = await fetchBlock(i)
+      if (!block) continue
+      cache.blocks.unshift(block)
+      if (cache.blocks.length > CONFIG.maxBlocks) cache.blocks.pop()
+      cache.networkInfo.latestBlock = block.number
+      broadcast('block', block)
+    }
+
+    // 每 5 个区块刷新余额
+    if (latest > 0 && (latest - start >= 0) && latest % 5 === 0) {
+      await fetchAccounts()
+      broadcast('accounts', cache.accounts)
+    }
+
+  } catch (err) {
+    if (cache.connected) {
+      cache.connected = false
+      cache.networkInfo.latestBlock = -1
+      broadcast('status', { connected: false, error: err.message })
+    }
+  }
+}
+
+// ============ 扫描 Artifacts ============
+function scanArtifacts(dir) {
+  const result = []
+  if (!existsSync(dir)) return result
+
+  function scan(d) {
+    let entries
+    try { entries = readdirSync(d) } catch { return }
+    for (const entry of entries) {
+      if (entry.startsWith('.') || entry === 'build-info') continue
+      const full = join(d, entry)
+      try {
+        if (statSync(full).isDirectory()) {
+          scan(full)
+        } else if (entry.endsWith('.json') && !entry.endsWith('.dbg.json')) {
+          const content = JSON.parse(readFileSync(full, 'utf-8'))
+          if (content.abi && content.contractName && content.contractName !== 'Migrations') {
+            // 去重
+            if (!result.find(r => r.name === content.contractName)) {
+              result.push({
+                name: content.contractName,
+                abi: content.abi,
+                bytecodeSize: content.bytecode
+                  ? Math.floor((content.bytecode.length - 2) / 2)
+                  : 0
+              })
+            }
+          }
+        }
+      } catch { /* 忽略解析错误 */ }
+    }
+  }
+
+  scan(dir)
+  return result
+}
+
+// ============ REST API ============
+
+// 连接状态
+app.get('/api/status', (req, res) => {
+  res.json({
+    connected: cache.connected,
+    ...cache.networkInfo,
+    rpcUrl: CONFIG.rpcUrl
+  })
+})
+
+// 账户列表
+app.get('/api/accounts', async (req, res) => {
+  try {
+    res.json(await fetchAccounts())
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// 区块列表（分页）
+app.get('/api/blocks', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '20'), 100)
+  const offset = parseInt(req.query.offset || '0')
+  res.json({
+    total: cache.blocks.length,
+    items: cache.blocks.slice(offset, offset + limit)
+  })
+})
+
+// 单个区块详情
+app.get('/api/blocks/:num', async (req, res) => {
+  try {
+    const num = parseInt(req.params.num)
+    if (isNaN(num)) return res.status(400).json({ error: '无效区块号' })
+    const cached = cache.blocks.find(b => b.number === num)
+    if (cached) {
+      const txDetails = cached.txList.map(h => cache.transactions.get(h)).filter(Boolean)
+      return res.json({ ...cached, txDetails })
+    }
+    const block = await fetchBlock(num)
+    if (!block) return res.status(404).json({ error: '区块不存在' })
+    const txDetails = block.txList.map(h => cache.transactions.get(h)).filter(Boolean)
+    res.json({ ...block, txDetails })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// 交易列表
+app.get('/api/transactions', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '50'), 200)
+  const offset = parseInt(req.query.offset || '0')
+  const all = Array.from(cache.transactions.values()).reverse()
+  res.json({ total: all.length, items: all.slice(offset, offset + limit) })
+})
+
+// 单个交易详情
+app.get('/api/transactions/:hash', async (req, res) => {
+  const cached = cache.transactions.get(req.params.hash)
+  if (cached) return res.json(cached)
+  try {
+    const tx = await rpc('eth_getTransactionByHash', [req.params.hash])
+    if (!tx) return res.status(404).json({ error: '交易不存在' })
+    res.json(tx)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// 事件日志
+app.get('/api/logs', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '100'), 500)
+  res.json(cache.logs.slice(0, limit))
+})
+
+// 合约（扫描 artifacts）
+app.get('/api/contracts', (req, res) => {
+  const dir = req.query.dir
+    ? decodeURIComponent(req.query.dir)
+    : CONFIG.artifactsDir
+  res.json(scanArtifacts(dir))
+})
+
+// EVM 控制（代理白名单 RPC）
+const RPC_WHITELIST = new Set([
+  'evm_mine',
+  'evm_setAutomine',
+  'evm_setIntervalMining',
+  'evm_increaseTime',
+  'evm_setNextBlockTimestamp',
+  'evm_snapshot',
+  'evm_revert',
+  'hardhat_reset',
+  'hardhat_setBalance',
+  'hardhat_impersonateAccount',
+  'hardhat_stopImpersonatingAccount',
+  'hardhat_getAutomine'
+])
+
+app.post('/api/rpc', async (req, res) => {
+  const { method, params = [] } = req.body
+  if (!RPC_WHITELIST.has(method)) {
+    return res.status(403).json({ error: `不允许调用: ${method}` })
+  }
+  try {
+    const result = await rpc(method, params)
+
+    if (method === 'hardhat_reset') {
+      // 重置后重新读取 Chain ID（fork 配置可能改变链 ID），并清空历史缓存
+      setTimeout(async () => {
+        try {
+          const chainIdHex = await rpc('eth_chainId')
+          cache.networkInfo.chainId = hexToDec(chainIdHex)
+          cache.networkInfo.latestBlock = -1
+          cache.blocks = []
+          cache.transactions.clear()
+          cache.logs = []
+          await fetchAccounts()
+          broadcast('status', {
+            connected: true,
+            chainId: cache.networkInfo.chainId,
+            clientVersion: cache.networkInfo.clientVersion,
+            latestBlock: 0,
+            rpcUrl: CONFIG.rpcUrl
+          })
+          broadcast('accounts', cache.accounts)
+        } catch { /* 节点尚未就绪，下次轮询会自动恢复 */ }
+      }, 500)
+    } else if (method === 'evm_mine' || method === 'evm_revert') {
+      // 挖块/回滚后刷新账户余额
+      setTimeout(async () => {
+        await fetchAccounts()
+        broadcast('accounts', cache.accounts)
+      }, 200)
+    }
+
+    res.json({ result })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// SSE 实时推送
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+
+  // 立即推送当前状态
+  res.write(`event: status\ndata: ${JSON.stringify({
+    connected: cache.connected,
+    ...cache.networkInfo,
+    rpcUrl: CONFIG.rpcUrl
+  })}\n\n`)
+
+  // 心跳保活（每 25 秒）
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n') } catch { clearInterval(heartbeat) }
+  }, 25000)
+
+  sseClients.add(res)
+  req.on('close', () => {
+    sseClients.delete(res)
+    clearInterval(heartbeat)
+  })
+})
+
+// ============ 启动 ============
+app.listen(CONFIG.port, () => {
+  console.log('\n╔════════════════════════════════════════╗')
+  console.log('║         Hardhat GUI 已启动             ║')
+  console.log('╠════════════════════════════════════════╣')
+  console.log(`║  界面地址: http://localhost:${CONFIG.port}        ║`)
+  console.log(`║  节点地址: ${CONFIG.rpcUrl}  ║`)
+  console.log('╚════════════════════════════════════════╝\n')
+  console.log(`  合约目录: ${CONFIG.artifactsDir}`)
+  console.log('  等待连接 Hardhat 节点...\n')
+
+  // 启动轮询
+  setInterval(pollBlocks, CONFIG.pollInterval)
+  pollBlocks()
+})

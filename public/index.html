@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hardhat GUI</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶部状态栏 -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">⛏ Hardhat GUI</div>
+      <div class="status-dot" :class="status.connected ? 'dot-ok' : 'dot-err'"></div>
+      <div class="status-label" :class="status.connected ? 'text-ok' : 'text-err'">
+        {{ status.connected ? '已连接' : '未连接' }}
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="meta-item">Chain ID <strong>{{ status.chainId ?? '--' }}</strong></span>
+      <span class="meta-sep">|</span>
+      <span class="meta-item">最新区块 <strong>#{{ status.latestBlock >= 0 ? status.latestBlock : '--' }}</strong></span>
+      <span class="meta-sep">|</span>
+      <span class="meta-item rpc">{{ status.rpcUrl || 'http://127.0.0.1:8545' }}</span>
+    </div>
+  </header>
+
+  <!-- 标签页导航 + 工具栏 -->
+  <nav class="navbar">
+    <div class="tabs">
+      <button
+        v-for="tab in tabs" :key="tab.id"
+        class="tab-btn"
+        :class="{ active: activeTab === tab.id }"
+        @click="switchTab(tab.id)">
+        {{ tab.label }}
+        <span v-if="tab.id === 'transactions' && transactions.total > 0" class="tab-count">{{ transactions.total }}</span>
+        <span v-if="tab.id === 'logs' && logs.length > 0" class="tab-count">{{ logs.length }}</span>
+      </button>
+    </div>
+    <div class="toolbar">
+      <button @click="mine" :disabled="!status.connected" class="btn btn-primary btn-sm" title="立即挖出一个区块">
+        ⛏ 出块
+      </button>
+      <label class="toggle-label" title="开启后每笔交易自动出块">
+        <input type="checkbox" v-model="automine" @change="toggleAutomine" :disabled="!status.connected">
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        <span>自动出块</span>
+      </label>
+      <button @click="showSnapshotModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">📸 快照</button>
+      <button @click="showTimeModal = true" :disabled="!status.connected" class="btn btn-ghost btn-sm">⏩ 时间</button>
+    </div>
+  </nav>
+
+  <!-- ==================== 账户 ==================== -->
+  <div v-if="activeTab === 'accounts'" class="tab-content">
+    <div class="panel-header">
+      <h2>账户列表</h2>
+      <button @click="loadAccounts" class="btn btn-ghost btn-sm">↺ 刷新</button>
+    </div>
+
+    <div v-if="accounts.length === 0" class="empty-state">
+      <div v-if="!status.connected">⚠ 未连接节点，请启动 <code>npx hardhat node</code></div>
+      <div v-else>加载中...</div>
+    </div>
+
+    <table v-else class="table">
+      <thead>
+        <tr>
+          <th style="width:40px">#</th>
+          <th>地址</th>
+          <th style="width:140px">余额 (ETH)</th>
+          <th style="width:80px">Nonce</th>
+          <th style="width:100px">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template v-for="(acc, idx) in accounts" :key="acc.address">
+          <tr @click="toggleAccount(acc.address)" class="row-click">
+            <td class="idx-cell">{{ idx }}</td>
+            <td class="mono">{{ acc.address }}</td>
+            <td class="balance-cell">{{ acc.balance }}</td>
+            <td class="center">{{ acc.nonce }}</td>
+            <td class="center">
+              <button @click.stop="copy(acc.address)" class="btn btn-xs">复制地址</button>
+            </td>
+          </tr>
+          <tr v-if="expandedAccount === acc.address" class="expanded-row">
+            <td colspan="5">
+              <div class="expand-box">
+                <div class="key-row">
+                  <span class="field-label">私钥：</span>
+                  <span v-if="acc.privateKey" class="mono key-text">
+                    {{ showKey ? acc.privateKey : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••' }}
+                  </span>
+                  <span v-else class="muted">非默认账户，私钥未知</span>
+                  <div class="key-actions" v-if="acc.privateKey">
+                    <button @click.stop="showKey = !showKey" class="btn btn-xs">{{ showKey ? '隐藏' : '显示' }}</button>
+                    <button v-if="showKey" @click.stop="copy(acc.privateKey)" class="btn btn-xs">复制</button>
+                  </div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ==================== 区块 ==================== -->
+  <div v-if="activeTab === 'blocks'" class="tab-content">
+    <div class="panel-header">
+      <h2>区块列表</h2>
+      <span class="muted">共 {{ blocks.total }} 个区块</span>
+    </div>
+
+    <div v-if="blocks.items.length === 0" class="empty-state">暂无区块数据</div>
+
+    <table v-else class="table">
+      <thead>
+        <tr>
+          <th style="width:90px">区块号</th>
+          <th style="width:170px">时间</th>
+          <th style="width:80px">交易数</th>
+          <th style="width:120px">Gas 已用</th>
+          <th style="width:120px">Gas 限制</th>
+          <th>区块哈希</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template v-for="block in blocks.items" :key="block.number">
+          <tr @click="toggleBlock(block.number)" class="row-click">
+            <td class="block-num">#{{ block.number }}</td>
+            <td>{{ formatTime(block.timestamp) }}</td>
+            <td class="center">
+              <span class="badge" :class="block.transactions > 0 ? 'badge-blue' : ''">{{ block.transactions }}</span>
+            </td>
+            <td class="mono-sm">{{ block.gasUsed.toLocaleString() }}</td>
+            <td class="mono-sm">{{ block.gasLimit.toLocaleString() }}</td>
+            <td class="mono hash-cell">{{ block.hash }}</td>
+          </tr>
+          <tr v-if="expandedBlock === block.number" class="expanded-row">
+            <td colspan="6">
+              <div class="expand-box" v-if="blockDetail[block.number]">
+                <div class="detail-grid">
+                  <div class="detail-row"><span class="field-label">父哈希</span><span class="mono">{{ blockDetail[block.number].parentHash }}</span></div>
+                  <div class="detail-row"><span class="field-label">矿工地址</span><span class="mono">{{ blockDetail[block.number].miner }}</span></div>
+                </div>
+                <div v-if="blockDetail[block.number].txDetails?.length > 0" class="inner-section">
+                  <h4>该区块交易（{{ blockDetail[block.number].txDetails.length }} 笔）</h4>
+                  <table class="inner-table">
+                    <thead>
+                      <tr><th>哈希</th><th>发送方</th><th>接收方</th><th>金额 ETH</th><th>状态</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="tx in blockDetail[block.number].txDetails" :key="tx.hash">
+                        <td class="mono hash-short">{{ tx.hash }}</td>
+                        <td class="mono hash-short">{{ tx.from }}</td>
+                        <td class="mono hash-short">{{ tx.to || '合约创建' }}</td>
+                        <td>{{ tx.value }}</td>
+                        <td><span class="badge" :class="statusClass(tx.status)">{{ statusLabel(tx.status) }}</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="muted" style="padding:8px 0">该区块无交易</div>
+              </div>
+              <div v-else class="expand-box muted">加载中...</div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+
+    <div class="pagination">
+      <button @click="prevPage('blocks')" :disabled="blocksPage <= 0" class="btn btn-ghost btn-sm">← 上一页</button>
+      <span class="page-info">第 {{ blocksPage + 1 }} 页 / 共 {{ Math.ceil(blocks.total / 20) || 1 }} 页</span>
+      <button @click="nextPage('blocks')" :disabled="(blocksPage + 1) * 20 >= blocks.total" class="btn btn-ghost btn-sm">下一页 →</button>
+    </div>
+  </div>
+
+  <!-- ==================== 交易 ==================== -->
+  <div v-if="activeTab === 'transactions'" class="tab-content">
+    <div class="panel-header">
+      <h2>交易记录</h2>
+      <span class="muted">共 {{ transactions.total }} 笔</span>
+    </div>
+
+    <div v-if="transactions.items.length === 0" class="empty-state">暂无交易记录</div>
+
+    <table v-else class="table">
+      <thead>
+        <tr>
+          <th>交易哈希</th>
+          <th style="width:80px">区块号</th>
+          <th>发送方</th>
+          <th>接收方</th>
+          <th style="width:110px">金额 (ETH)</th>
+          <th style="width:100px">Gas 消耗</th>
+          <th style="width:80px">状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template v-for="tx in transactions.items" :key="tx.hash">
+          <tr @click="toggleTx(tx.hash)" class="row-click">
+            <td class="mono hash-cell">{{ tx.hash }}</td>
+            <td class="center">#{{ tx.blockNumber }}</td>
+            <td class="mono hash-short">{{ tx.from }}</td>
+            <td class="mono hash-short">{{ tx.to || '合约创建' }}</td>
+            <td>{{ tx.value }}</td>
+            <td class="center">{{ tx.gasUsed != null ? tx.gasUsed.toLocaleString() : '--' }}</td>
+            <td><span class="badge" :class="statusClass(tx.status)">{{ statusLabel(tx.status) }}</span></td>
+          </tr>
+          <tr v-if="expandedTx === tx.hash" class="expanded-row">
+            <td colspan="7">
+              <div class="expand-box">
+                <div class="detail-grid">
+                  <div class="detail-row"><span class="field-label">完整哈希</span><span class="mono">{{ tx.hash }}</span></div>
+                  <div class="detail-row"><span class="field-label">发送方</span><span class="mono">{{ tx.from }}</span></div>
+                  <div class="detail-row"><span class="field-label">接收方</span><span class="mono">{{ tx.to || '合约创建' }}</span></div>
+                  <div class="detail-row" v-if="tx.contractAddress"><span class="field-label">合约地址</span><span class="mono">{{ tx.contractAddress }}</span></div>
+                  <div class="detail-row"><span class="field-label">Gas 价格</span><span>{{ tx.gasPrice ? (parseInt(tx.gasPrice, 16) / 1e9).toFixed(4) + ' Gwei' : '--' }}</span></div>
+                  <div class="detail-row"><span class="field-label">Gas 限制</span><span>{{ tx.gas?.toLocaleString() }}</span></div>
+                  <div class="detail-row"><span class="field-label">Gas 消耗</span><span>{{ tx.gasUsed != null ? tx.gasUsed.toLocaleString() : '--' }}</span></div>
+                  <div class="detail-row"><span class="field-label">Nonce</span><span>{{ tx.nonce }}</span></div>
+                </div>
+                <div v-if="tx.input && tx.input !== '0x'" class="input-data-section">
+                  <div class="field-label">Input Data：</div>
+                  <div class="input-data mono">{{ tx.input }}</div>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+
+    <div class="pagination">
+      <button @click="prevPage('tx')" :disabled="txPage <= 0" class="btn btn-ghost btn-sm">← 上一页</button>
+      <span class="page-info">第 {{ txPage + 1 }} 页 / 共 {{ Math.ceil(transactions.total / 50) || 1 }} 页</span>
+      <button @click="nextPage('tx')" :disabled="(txPage + 1) * 50 >= transactions.total" class="btn btn-ghost btn-sm">下一页 →</button>
+    </div>
+  </div>
+
+  <!-- ==================== 合约 ==================== -->
+  <div v-if="activeTab === 'contracts'" class="tab-content">
+    <div class="panel-header">
+      <h2>合约</h2>
+      <div class="dir-row">
+        <input v-model="artifactsDir" placeholder="artifacts 目录（留空使用默认）" class="input input-dir" />
+        <button @click="loadContracts" class="btn btn-primary btn-sm">扫描</button>
+      </div>
+    </div>
+
+    <div class="contracts-layout">
+      <!-- 左：合约列表 -->
+      <div class="contracts-sidebar">
+        <div v-if="contracts.length === 0" class="empty-state" style="padding:24px">
+          <div>未发现合约文件</div>
+          <small class="muted">请确认 artifacts 目录路径正确</small>
+        </div>
+        <div
+          v-for="c in contracts" :key="c.name"
+          class="contract-item"
+          :class="{ 'contract-active': selectedContract?.name === c.name }"
+          @click="selectedContract = c">
+          <div class="contract-name">{{ c.name }}</div>
+          <div class="contract-meta">{{ c.abi.length }} 个成员 · {{ c.bytecodeSize }} bytes</div>
+        </div>
+      </div>
+
+      <!-- 右：ABI 详情 -->
+      <div class="contract-detail">
+        <div v-if="!selectedContract" class="empty-state" style="height:100%">
+          从左侧选择合约查看 ABI
+        </div>
+        <div v-else>
+          <h3>{{ selectedContract.name }}</h3>
+          <div class="deploy-row">
+            <input
+              v-model="contractAddresses[selectedContract.name]"
+              placeholder="输入已部署合约地址 0x..."
+              class="input" />
+          </div>
+          <div class="abi-list">
+            <div v-for="item in selectedContract.abi" :key="(item.name || '') + item.type" class="abi-item">
+              <span class="abi-tag" :class="'abi-' + item.type">{{ abiTypeLabel(item.type) }}</span>
+              <span class="abi-name">{{ item.name || '' }}</span>
+              <span class="abi-sig" v-if="item.inputs?.length">
+                ({{ item.inputs.map(i => i.type + (i.name ? ' ' + i.name : '')).join(', ') }})
+              </span>
+              <span class="abi-mut" v-if="item.stateMutability && item.stateMutability !== 'nonpayable'">
+                {{ item.stateMutability }}
+              </span>
+              <span class="abi-outputs" v-if="item.outputs?.length">
+                → {{ item.outputs.map(o => o.type).join(', ') }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 日志 ==================== -->
+  <div v-if="activeTab === 'logs'" class="tab-content logs-tab">
+    <div class="panel-header">
+      <h2>事件日志</h2>
+      <div class="panel-actions">
+        <span class="muted">{{ logs.length }} 条记录</span>
+        <button @click="logs = []" class="btn btn-ghost btn-sm">清空</button>
+      </div>
+    </div>
+
+    <div v-if="logs.length === 0" class="empty-state" style="margin-top:40px">
+      暂无事件日志，等待链上交易...
+    </div>
+
+    <div v-else class="logs-list" ref="logsRef">
+      <div v-for="log in logs" :key="log.id" class="log-item">
+        <div class="log-header">
+          <span class="badge badge-blue">块 #{{ log.blockNumber }}</span>
+          <span class="log-addr mono">{{ log.address }}</span>
+          <span class="log-tx muted mono">Tx: {{ log.transactionHash?.slice(0, 20) }}...</span>
+        </div>
+        <div class="log-topics">
+          <div v-for="(topic, i) in log.topics" :key="i" class="topic-row">
+            <span class="field-label">Topic{{ i }}</span>
+            <span class="mono">{{ topic }}</span>
+          </div>
+        </div>
+        <div v-if="log.data && log.data !== '0x'" class="log-data-row">
+          <span class="field-label">Data</span>
+          <span class="mono">{{ log.data }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 快照 Modal ==================== -->
+  <div v-if="showSnapshotModal" class="modal-overlay" @click.self="showSnapshotModal = false">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>网络快照管理</h3>
+        <button @click="showSnapshotModal = false" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted">快照保存当前链状态，可随时回滚。</p>
+        <button @click="createSnapshot" class="btn btn-primary">创建快照</button>
+        <div v-if="snapshots.length === 0" class="empty-state" style="margin:16px 0">暂无快照</div>
+        <div v-else class="snapshot-list">
+          <div v-for="snap in snapshots" :key="snap.id" class="snapshot-item">
+            <div>
+              <span class="badge badge-blue">ID: {{ snap.id }}</span>
+              <span class="muted" style="margin-left:8px">{{ snap.time }}</span>
+              <span class="muted" style="margin-left:8px">块 #{{ snap.blockNumber }}</span>
+            </div>
+            <button @click="revertSnapshot(snap)" class="btn btn-sm btn-danger">回滚</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 时间 Modal ==================== -->
+  <div v-if="showTimeModal" class="modal-overlay" @click.self="showTimeModal = false">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>时间控制</h3>
+        <button @click="showTimeModal = false" class="btn-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="muted">快进区块时间戳，不影响系统时钟。</p>
+        <div class="form-row">
+          <label>快进秒数：</label>
+          <input v-model.number="timeAdvance" type="number" min="1" class="input" placeholder="3600" style="width:120px" />
+          <span class="muted">约 {{ formatDuration(timeAdvance) }}</span>
+        </div>
+        <div class="modal-actions">
+          <button @click="advanceTime" class="btn btn-primary">确认快进</button>
+          <button @click="showTimeModal = false" class="btn btn-ghost">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 通知 -->
+  <transition name="toast-fade">
+    <div v-if="toast.show" class="toast" :class="'toast-' + toast.type">
+      {{ toast.message }}
+    </div>
+  </transition>
+
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
