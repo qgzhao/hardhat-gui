@@ -652,8 +652,13 @@ const nodeConfig = {
 // SSE：节点控制台输出推送
 const consoleSseClients = new Set()
 
+// 去除 ANSI 颜色/控制转义码
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+}
+
 function broadcastConsole(line, level = 'info') {
-  const entry = { line, level, ts: Date.now() }
+  const entry = { line: stripAnsi(line), level, ts: Date.now() }
   nodeState.logs.push(entry)
   if (nodeState.logs.length > 300) nodeState.logs.shift()
   const msg = `event: console\ndata: ${JSON.stringify(entry)}\n\n`
@@ -784,7 +789,8 @@ async function startHardhatNode() {
   child.stdout.setEncoding('utf-8')
   child.stdout.on('data', chunk => {
     const lines = chunk.split('\n')
-    for (const line of lines) {
+    for (const rawLine of lines) {
+      const line = stripAnsi(rawLine)
       if (!line.trim()) continue
       broadcastConsole(line, 'info')
       stdoutBuf.push(line)
@@ -806,7 +812,7 @@ async function startHardhatNode() {
   child.stderr.setEncoding('utf-8')
   child.stderr.on('data', chunk => {
     for (const line of chunk.split('\n')) {
-      if (line.trim()) broadcastConsole(line, 'error')
+      if (line.trim()) broadcastConsole(stripAnsi(line), 'error')
     }
   })
 

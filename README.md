@@ -215,43 +215,49 @@ GUI 内置完整的节点生命周期管理，无需手动在命令行操作。
 ### 系统架构图
 
 ```mermaid
-graph TB
+graph LR
     subgraph Browser["浏览器（Vue 3 CDN）"]
-        UI["界面组件<br/>节点 / 账户 / 区块 / 交易 / 合约 / 日志"]
+        UI["界面\n节点 · 账户 · 区块 · 交易 · 合约 · 日志"]
     end
 
-    subgraph Server["Express 服务器（server.js :3000）"]
-        REST["REST API<br/>/api/accounts /api/blocks /api/transactions"]
-        SSE_main["SSE 主推送<br/>/api/events<br/>block · transaction · log · accounts · status"]
-        SSE_node["SSE 节点控制台<br/>/api/node/console<br/>console · nodeStatus"]
-        RPC_proxy["RPC 代理<br/>/api/rpc（白名单）"]
-        WS_client["WS 客户端<br/>eth_subscribe<br/>newHeads + logs"]
-        HTTP_client["HTTP 客户端<br/>eth_getBlockByNumber<br/>eth_getBalance · eth_getTransactionReceipt"]
-        Node_mgr["节点管理器<br/>startHardhatNode / stopHardhatNode"]
-        Cache["内存缓存<br/>区块 ×200 · 交易 ×500 · 日志 ×500"]
+    subgraph Server["Express 服务器（:3000）"]
+        direction TB
+        subgraph Iface["接口层（面向浏览器）"]
+            direction LR
+            REST["REST API"]
+            RPC_P["RPC 代理"]
+            SSE_M["SSE 主推送"]
+            SSE_N["SSE 控制台"]
+        end
+        CACHE[("内存缓存\n区块×200 · 交易×500 · 日志×500")]
+        subgraph Conn["连接层（面向节点）"]
+            direction LR
+            WS_C["WS 客户端"]
+            HTTP_C["HTTP 客户端"]
+            N_MGR["节点管理器"]
+        end
     end
 
     subgraph Hardhat["Hardhat 节点（:8545）"]
+        direction TB
         HH_WS["WebSocket 端点"]
         HH_HTTP["HTTP 端点"]
-        HH_proc["子进程（spawn）"]
+        HH_PROC["子进程"]
     end
 
-    UI -- "REST / RPC 请求" --> REST
-    UI -- "REST / RPC 请求" --> RPC_proxy
-    SSE_main -- "实时推送" --> UI
-    SSE_node -- "控制台输出" --> UI
+    UI -->|"查询 / 操作"| REST
+    UI -->|"evm_* · hardhat_*"| RPC_P
+    SSE_M -->|"block · tx · log · accounts"| UI
+    SSE_N -->|"console · nodeStatus"| UI
 
-    REST --> Cache
-    WS_client -- "newHeads / logs 事件" --> Cache
-    Cache --> SSE_main
+    REST --- CACHE
+    WS_C -->|"newHeads · logs 事件"| CACHE
+    CACHE --> SSE_M
 
-    WS_client <-->|"WebSocket"| HH_WS
-    HTTP_client -->|"HTTP JSON-RPC"| HH_HTTP
-    RPC_proxy -->|"HTTP JSON-RPC"| HH_HTTP
-
-    Node_mgr -->|"child_process.spawn"| HH_proc
-    Node_mgr --> SSE_node
+    WS_C <-->|"WebSocket"| HH_WS
+    HTTP_C & RPC_P -->|"JSON-RPC"| HH_HTTP
+    N_MGR -->|"child_process.spawn"| HH_PROC
+    N_MGR --> SSE_N
 ```
 
 ### WebSocket 连接状态机
