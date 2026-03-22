@@ -1,7 +1,8 @@
 import express from 'express'
 import { fileURLToPath } from 'url'
-import { dirname, join } from 'path'
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs'
+import { dirname, join, resolve } from 'path'
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs'
+import { spawn, execSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -459,6 +460,318 @@ app.get('/api/events', (req, res) => {
   sseClients.add(res)
   req.on('close', () => {
     sseClients.delete(res)
+    clearInterval(heartbeat)
+  })
+})
+
+// ============================================================
+// 节点管理
+// ============================================================
+
+// 工作目录：存放生成的 hardhat.config.js
+const WORKDIR = join(__dirname, 'node-workspace')
+
+// 节点进程状态
+const nodeState = {
+  child:   null,       // ChildProcess 对象
+  status:  'stopped',  // 'stopped' | 'starting' | 'running' | 'stopping'
+  pid:     null,
+  logs:    [],         // 最近 300 条控制台输出
+  accounts: [],        // 从 stdout 解析出的账户
+}
+
+// 节点配置（持久化到内存，重启服务后恢复默认）
+const nodeConfig = {
+  projectDir:     join(__dirname, '..', 'dapp'), // 指向现有 Hardhat 项目
+  port:           8545,
+  hostname:       '127.0.0.1',
+  chainId:        31337,
+  accountCount:   20,
+  initialBalance: '10000',   // ETH（字符串，避免浮点问题）
+  mnemonic:       'test test test test test test test test test test test junk',
+  fork:           '',
+  forkBlockNumber: '',
+}
+
+// SSE：节点控制台输出推送
+const consoleSseClients = new Set()
+
+function broadcastConsole(line, level = 'info') {
+  const entry = { line, level, ts: Date.now() }
+  nodeState.logs.push(entry)
+  if (nodeState.logs.length > 300) nodeState.logs.shift()
+  const msg = `event: console\ndata: ${JSON.stringify(entry)}\n\n`
+  for (const res of consoleSseClients) {
+    try { res.write(msg) } catch { consoleSseClients.delete(res) }
+  }
+}
+
+function broadcastNodeStatus() {
+  const payload = {
+    status:   nodeState.status,
+    pid:      nodeState.pid,
+    accounts: nodeState.accounts,
+    config:   nodeConfig,
+  }
+  const msg = `event: nodeStatus\ndata: ${JSON.stringify(payload)}\n\n`
+  for (const res of consoleSseClients) {
+    try { res.write(msg) } catch { consoleSseClients.delete(res) }
+  }
+  // 同时通过主 SSE 推送节点状态变化
+  broadcast('nodeStatus', payload)
+}
+
+// 查找 Hardhat CLI 入口脚本（优先使用指定项目目录）
+function findHardhatCli(projectDir) {
+  const candidates = [
+    join(projectDir, 'node_modules', 'hardhat', 'dist', 'src', 'cli.js'),
+    join(__dirname, 'node_modules', 'hardhat', 'dist', 'src', 'cli.js'),
+  ]
+  for (const p of candidates) {
+    if (existsSync(p)) return p
+  }
+  return null
+}
+
+// 生成最小化 hardhat.config.js（纯对象导出，无外部 import）
+function generateConfig(cfg) {
+  const balanceWei = (BigInt(Math.floor(parseFloat(cfg.initialBalance))) * BigInt('1000000000000000000')).toString()
+  const chainId = parseInt(cfg.chainId) || 31337
+
+  const lines = [
+    `// 由 Hardhat GUI 自动生成，请勿手动修改`,
+    `export default {`,
+    `  networks: {`,
+    `    node: {`,
+    `      type: "edr-simulated",`,
+    `      chainType: "l1",`,
+    `      chainId: ${chainId},`,
+    `      accounts: {`,
+    `        mnemonic: ${JSON.stringify(cfg.mnemonic)},`,
+    `        count: ${parseInt(cfg.accountCount) || 20},`,
+    `        accountsBalance: "${balanceWei}",`,
+    `      },`,
+    `    },`,
+    `  },`,
+    `  solidity: { version: "0.8.28" },`,
+    `}`,
+  ]
+  return lines.join('\n') + '\n'
+}
+
+// 初始化工作目录
+function ensureWorkdir() {
+  if (!existsSync(WORKDIR)) mkdirSync(WORKDIR, { recursive: true })
+  const pkgPath = join(WORKDIR, 'package.json')
+  if (!existsSync(pkgPath)) {
+    writeFileSync(pkgPath, JSON.stringify({ type: 'module' }, null, 2))
+  }
+}
+
+// 从 stdout 解析账户（Hardhat 启动时打印）
+function parseAccountsFromOutput(lines) {
+  const accounts = []
+  let i = 0
+  while (i < lines.length) {
+    const addrMatch = lines[i].match(/Account #(\d+):\s*(0x[a-fA-F0-9]{40})/)
+    if (addrMatch) {
+      const entry = { index: parseInt(addrMatch[1]), address: addrMatch[2], privateKey: null }
+      if (i + 1 < lines.length) {
+        const keyMatch = lines[i + 1].match(/Private Key:\s*(0x[a-fA-F0-9]{64})/)
+        if (keyMatch) { entry.privateKey = keyMatch[1]; i++ }
+      }
+      accounts.push(entry)
+    }
+    i++
+  }
+  return accounts
+}
+
+// ---- 启动节点 ----
+async function startHardhatNode() {
+  if (nodeState.status !== 'stopped') {
+    throw new Error('节点已在运行')
+  }
+
+  const cfg = nodeConfig
+  const hardhatCli = findHardhatCli(cfg.projectDir)
+  if (!hardhatCli) {
+    throw new Error(`在 ${cfg.projectDir}/node_modules 中未找到 Hardhat，请确认项目目录正确`)
+  }
+
+  ensureWorkdir()
+  writeFileSync(join(WORKDIR, 'hardhat.config.js'), generateConfig(cfg), 'utf-8')
+
+  // CLI 参数
+  const args = ['node']
+  if (cfg.hostname)       args.push('--hostname', cfg.hostname)
+  if (cfg.port)           args.push('--port', String(cfg.port))
+  if (cfg.chainId)        args.push('--chain-id', String(cfg.chainId))
+  if (cfg.fork)           args.push('--fork', cfg.fork)
+  if (cfg.fork && cfg.forkBlockNumber) args.push('--fork-block-number', String(cfg.forkBlockNumber))
+
+  nodeState.status   = 'starting'
+  nodeState.accounts = []
+  broadcastNodeStatus()
+
+  const child = spawn(process.execPath, [hardhatCli, ...args], {
+    cwd: WORKDIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  nodeState.child = child
+  nodeState.pid   = child.pid
+
+  const stdoutBuf = []
+  let started = false
+
+  child.stdout.setEncoding('utf-8')
+  child.stdout.on('data', chunk => {
+    const lines = chunk.split('\n')
+    for (const line of lines) {
+      if (!line.trim()) continue
+      broadcastConsole(line, 'info')
+      stdoutBuf.push(line)
+
+      // 检测启动成功
+      if (!started && /Started HTTP.*server at/i.test(line)) {
+        started = true
+        nodeState.status = 'running'
+        // 同步更新 CONFIG.rpcUrl，让 GUI 轮询连上新节点
+        CONFIG.rpcUrl = `http://${cfg.hostname}:${cfg.port}`
+        // 解析账户
+        nodeState.accounts = parseAccountsFromOutput(stdoutBuf)
+        broadcastNodeStatus()
+        broadcastConsole(`✓ 节点已就绪，监听 ${CONFIG.rpcUrl}`, 'success')
+      }
+    }
+  })
+
+  child.stderr.setEncoding('utf-8')
+  child.stderr.on('data', chunk => {
+    for (const line of chunk.split('\n')) {
+      if (line.trim()) broadcastConsole(line, 'error')
+    }
+  })
+
+  child.on('close', code => {
+    nodeState.status  = 'stopped'
+    nodeState.child   = null
+    nodeState.pid     = null
+    broadcastConsole(`节点进程已退出（code: ${code ?? 'null'}）`, code === 0 ? 'info' : 'error')
+    broadcastNodeStatus()
+  })
+
+  child.on('error', err => {
+    nodeState.status = 'stopped'
+    nodeState.child  = null
+    nodeState.pid    = null
+    broadcastConsole(`启动失败: ${err.message}`, 'error')
+    broadcastNodeStatus()
+  })
+}
+
+// ---- 停止节点 ----
+function stopHardhatNode() {
+  const child = nodeState.child
+  if (!child) throw new Error('节点未运行')
+
+  nodeState.status = 'stopping'
+  broadcastNodeStatus()
+
+  try {
+    if (process.platform === 'win32') {
+      // Windows：杀进程树
+      execSync(`taskkill /F /T /PID ${child.pid}`, { stdio: 'ignore' })
+    } else {
+      child.kill('SIGTERM')
+    }
+  } catch (err) {
+    broadcastConsole(`停止进程时出错: ${err.message}`, 'error')
+  }
+}
+
+// ---- REST API ----
+
+// 节点状态
+app.get('/api/node/status', (req, res) => {
+  res.json({
+    status:   nodeState.status,
+    pid:      nodeState.pid,
+    accounts: nodeState.accounts,
+    config:   nodeConfig,
+  })
+})
+
+// 获取/更新配置
+app.get('/api/node/config', (req, res) => res.json(nodeConfig))
+
+app.post('/api/node/config', (req, res) => {
+  const allowed = ['projectDir','port','hostname','chainId','accountCount','initialBalance','mnemonic','fork','forkBlockNumber']
+  for (const k of allowed) {
+    if (req.body[k] !== undefined) nodeConfig[k] = req.body[k]
+  }
+  res.json({ ok: true, config: nodeConfig })
+})
+
+// 启动
+app.post('/api/node/start', async (req, res) => {
+  try {
+    // 允许请求体中携带一次性配置覆盖
+    if (req.body && typeof req.body === 'object') {
+      const allowed = ['projectDir','port','hostname','chainId','accountCount','initialBalance','mnemonic','fork','forkBlockNumber']
+      for (const k of allowed) {
+        if (req.body[k] !== undefined) nodeConfig[k] = req.body[k]
+      }
+    }
+    await startHardhatNode()
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+// 停止
+app.post('/api/node/stop', (req, res) => {
+  try {
+    stopHardhatNode()
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(400).json({ error: err.message })
+  }
+})
+
+// 控制台日志（历史）
+app.get('/api/node/logs', (req, res) => {
+  res.json(nodeState.logs)
+})
+
+// 控制台实时 SSE
+app.get('/api/node/console', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+
+  // 推送当前节点状态
+  res.write(`event: nodeStatus\ndata: ${JSON.stringify({
+    status: nodeState.status, pid: nodeState.pid,
+    accounts: nodeState.accounts, config: nodeConfig,
+  })}\n\n`)
+
+  // 推送历史日志（最近 100 条）
+  const recent = nodeState.logs.slice(-100)
+  for (const entry of recent) {
+    res.write(`event: console\ndata: ${JSON.stringify(entry)}\n\n`)
+  }
+
+  const heartbeat = setInterval(() => {
+    try { res.write(': ping\n\n') } catch { clearInterval(heartbeat) }
+  }, 25000)
+
+  consoleSseClients.add(res)
+  req.on('close', () => {
+    consoleSseClients.delete(res)
     clearInterval(heartbeat)
   })
 })

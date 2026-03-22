@@ -38,6 +38,7 @@
         {{ tab.label }}
         <span v-if="tab.id === 'transactions' && transactions.total > 0" class="tab-count">{{ transactions.total }}</span>
         <span v-if="tab.id === 'logs' && logs.length > 0" class="tab-count">{{ logs.length }}</span>
+        <span v-if="tab.id === 'node'" class="tab-count" :class="nodeStatusClass">{{ nodeStatusDot }}</span>
       </button>
     </div>
     <div class="toolbar">
@@ -336,6 +337,140 @@
           <span class="mono">{{ log.data }}</span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ==================== 节点管理 ==================== -->
+  <div v-if="activeTab === 'node'" class="tab-content node-tab">
+
+    <!-- 状态栏 -->
+    <div class="node-status-bar">
+      <div class="node-status-info">
+        <span class="node-dot" :class="'node-dot-' + node.status"></span>
+        <span class="node-status-text">{{ nodeStatusLabel }}</span>
+        <span v-if="node.pid" class="muted">PID {{ node.pid }}</span>
+        <span v-if="node.status === 'running'" class="muted">
+          · {{ node.config.hostname }}:{{ node.config.port }} · Chain ID {{ node.config.chainId }}
+        </span>
+      </div>
+      <div class="node-status-actions">
+        <button
+          v-if="node.status === 'stopped'"
+          @click="startNode"
+          class="btn btn-primary">
+          ▶ 启动节点
+        </button>
+        <button
+          v-else-if="node.status === 'running'"
+          @click="stopNode"
+          class="btn btn-danger">
+          ■ 停止节点
+        </button>
+        <button v-else class="btn" disabled>
+          <span class="spinner"></span>
+          {{ node.status === 'starting' ? '启动中...' : '停止中...' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="node-layout">
+
+      <!-- 左：配置面板 -->
+      <div class="node-config-panel">
+        <h3 class="section-title">节点配置</h3>
+
+        <div class="config-group">
+          <div class="config-label">Hardhat 项目目录</div>
+          <input v-model="node.config.projectDir" class="input" placeholder="../dapp" :disabled="node.status !== 'stopped'" />
+          <div class="config-hint">含 node_modules/hardhat 的项目路径</div>
+        </div>
+
+        <div class="config-row">
+          <div class="config-group">
+            <div class="config-label">监听端口</div>
+            <input v-model.number="node.config.port" type="number" class="input" :disabled="node.status !== 'stopped'" />
+          </div>
+          <div class="config-group">
+            <div class="config-label">监听地址</div>
+            <input v-model="node.config.hostname" class="input" :disabled="node.status !== 'stopped'" />
+          </div>
+        </div>
+
+        <div class="config-group">
+          <div class="config-label">Chain ID</div>
+          <input v-model.number="node.config.chainId" type="number" class="input" :disabled="node.status !== 'stopped'" />
+        </div>
+
+        <!-- 折叠：账户配置 -->
+        <div class="config-section">
+          <div class="config-section-hd" @click="showAdvanced = !showAdvanced">
+            <span>账户配置</span>
+            <span class="chevron" :class="{ open: showAdvanced }">›</span>
+          </div>
+          <div v-if="showAdvanced" class="config-section-bd">
+            <div class="config-row">
+              <div class="config-group">
+                <div class="config-label">账户数量</div>
+                <input v-model.number="node.config.accountCount" type="number" class="input" :disabled="node.status !== 'stopped'" />
+              </div>
+              <div class="config-group">
+                <div class="config-label">初始余额 (ETH)</div>
+                <input v-model="node.config.initialBalance" type="text" class="input" :disabled="node.status !== 'stopped'" />
+              </div>
+            </div>
+            <div class="config-group">
+              <div class="config-label">助记词 (Mnemonic)</div>
+              <input v-model="node.config.mnemonic" class="input mono" :disabled="node.status !== 'stopped'" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 折叠：Fork 配置 -->
+        <div class="config-section">
+          <div class="config-section-hd" @click="showFork = !showFork">
+            <span>Fork 配置</span>
+            <span class="chevron" :class="{ open: showFork }">›</span>
+          </div>
+          <div v-if="showFork" class="config-section-bd">
+            <div class="config-group">
+              <div class="config-label">Fork 源 RPC URL</div>
+              <input v-model="node.config.fork" class="input" placeholder="https://mainnet.infura.io/v3/..." :disabled="node.status !== 'stopped'" />
+            </div>
+            <div class="config-group">
+              <div class="config-label">Fork 起始区块（留空=最新）</div>
+              <input v-model="node.config.forkBlockNumber" class="input" placeholder="可选" :disabled="node.status !== 'stopped'" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 运行中的账户列表 -->
+        <div v-if="node.status === 'running' && node.accounts.length > 0" class="node-accounts">
+          <h3 class="section-title">运行账户</h3>
+          <div v-for="acc in node.accounts" :key="acc.address" class="node-acc-row">
+            <span class="muted acc-idx">#{{ acc.index }}</span>
+            <span class="mono acc-addr">{{ acc.address }}</span>
+            <button @click="copy(acc.privateKey || acc.address)" class="btn btn-xs">复制私钥</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右：控制台 -->
+      <div class="node-console-panel">
+        <div class="console-header">
+          <span>控制台输出</span>
+          <button @click="nodeLogs = []" class="btn btn-ghost btn-xs">清空</button>
+        </div>
+        <div class="console-body" ref="consoleRef">
+          <div v-if="nodeLogs.length === 0" class="console-empty">等待节点启动...</div>
+          <div
+            v-for="(entry, i) in nodeLogs" :key="i"
+            class="console-line"
+            :class="'log-' + entry.level">
+            {{ entry.line }}
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 

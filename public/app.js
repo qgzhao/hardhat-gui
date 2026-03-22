@@ -6,6 +6,7 @@ createApp({
       // 标签页
       activeTab: 'accounts',
       tabs: [
+        { id: 'node',         label: '节点' },
         { id: 'accounts',     label: '账户' },
         { id: 'blocks',       label: '区块' },
         { id: 'transactions', label: '交易' },
@@ -59,7 +60,29 @@ createApp({
       toastTimer: null,
 
       // SSE
-      eventSource: null,
+      eventSource:     null,
+      consoleSse:      null,
+
+      // 节点管理
+      node: {
+        status:   'stopped',
+        pid:      null,
+        accounts: [],
+        config: {
+          projectDir:     '../dapp',
+          port:           8545,
+          hostname:       '127.0.0.1',
+          chainId:        31337,
+          accountCount:   20,
+          initialBalance: '10000',
+          mnemonic:       'test test test test test test test test test test test junk',
+          fork:           '',
+          forkBlockNumber: '',
+        }
+      },
+      nodeLogs:     [],
+      showAdvanced: false,
+      showFork:     false,
     }
   },
 
@@ -70,6 +93,19 @@ createApp({
 
   beforeUnmount() {
     if (this.eventSource) this.eventSource.close()
+    if (this.consoleSse)  this.consoleSse.close()
+  },
+
+  computed: {
+    nodeStatusLabel() {
+      return { stopped: '已停止', starting: '启动中', running: '运行中', stopping: '停止中' }[this.node.status] || '--'
+    },
+    nodeStatusClass() {
+      return { stopped: 'count-gray', starting: 'count-yellow', running: 'count-green', stopping: 'count-yellow' }[this.node.status] || ''
+    },
+    nodeStatusDot() {
+      return { stopped: '●', starting: '◌', running: '●', stopping: '◌' }[this.node.status] || '●'
+    },
   },
 
   methods: {
@@ -79,6 +115,7 @@ createApp({
     // ==============================
     async loadInitialData() {
       await Promise.allSettled([
+        this.loadNodeStatus(),
         this.loadAccounts(),
         this.loadBlocks(),
         this.loadTransactions(),
@@ -144,6 +181,59 @@ createApp({
       this.eventSource.onerror = () => {
         this.status.connected = false
       }
+
+      // 节点状态（通过主 SSE 推送）
+      this.eventSource.addEventListener('nodeStatus', e => {
+        const data = JSON.parse(e.data)
+        this.applyNodeStatus(data)
+      })
+    },
+
+    // 节点控制台 SSE（独立连接，tab 切换时建立）
+    initConsoleSse() {
+      if (this.consoleSse) return
+      this.consoleSse = new EventSource('/api/node/console')
+
+      this.consoleSse.addEventListener('console', e => {
+        const entry = JSON.parse(e.data)
+        this.nodeLogs.push(entry)
+        if (this.nodeLogs.length > 500) this.nodeLogs.shift()
+        this.$nextTick(() => {
+          const el = this.$refs.consoleRef
+          if (el) el.scrollTop = el.scrollHeight
+        })
+      })
+
+      this.consoleSse.addEventListener('nodeStatus', e => {
+        this.applyNodeStatus(JSON.parse(e.data))
+      })
+    },
+
+    applyNodeStatus(data) {
+      this.node.status   = data.status
+      this.node.pid      = data.pid
+      this.node.accounts = data.accounts || []
+      if (data.config) Object.assign(this.node.config, data.config)
+    },
+
+    // ==============================
+    // 节点管理
+    // ==============================
+    async loadNodeStatus() {
+      const data = await this.get('/api/node/status')
+      if (data) this.applyNodeStatus(data)
+    },
+
+    async startNode() {
+      const res = await this.post('/api/node/start', this.node.config)
+      if (res === null) return
+      this.initConsoleSse()
+      this.showToast('节点启动指令已发送', 'info')
+    },
+
+    async stopNode() {
+      const res = await this.post('/api/node/stop', {})
+      if (res !== null) this.showToast('停止指令已发送', 'info')
     },
 
     // ==============================
@@ -185,6 +275,7 @@ createApp({
       this.expandedAccount = null
       this.expandedBlock   = null
       this.expandedTx      = null
+      if (id === 'node') this.initConsoleSse()
     },
 
     // ==============================
@@ -303,6 +394,22 @@ createApp({
         return await res.json()
       } catch (err) {
         this.showToast('请求失败：' + err.message, 'error')
+        return null
+      }
+    },
+
+    async post(url, body) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        return data
+      } catch (err) {
+        this.showToast(err.message, 'error')
         return null
       }
     },
