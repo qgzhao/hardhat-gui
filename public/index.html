@@ -381,8 +381,8 @@
 
         <div class="config-group">
           <div class="config-label">Hardhat 项目目录</div>
-          <input v-model="node.config.projectDir" class="input" placeholder="../dapp" :disabled="node.status !== 'stopped'" />
-          <div class="config-hint">含 node_modules/hardhat 的项目路径</div>
+          <input v-model="node.config.projectDir" class="input" placeholder="留空使用内置 Hardhat" :disabled="node.status !== 'stopped'" />
+          <div class="config-hint">留空使用内置版本，或填入其他 Hardhat 项目路径</div>
         </div>
 
         <div class="config-row">

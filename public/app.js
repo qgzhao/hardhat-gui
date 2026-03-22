@@ -69,7 +69,7 @@ createApp({
         pid:      null,
         accounts: [],
         config: {
-          projectDir:     '../dapp',
+          projectDir:     '',
           port:           8545,
           hostname:       '127.0.0.1',
           chainId:        31337,

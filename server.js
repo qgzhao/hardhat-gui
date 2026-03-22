@@ -482,7 +482,7 @@ const nodeState = {
 
 // 节点配置（持久化到内存，重启服务后恢复默认）
 const nodeConfig = {
-  projectDir:     join(__dirname, '..', 'dapp'), // 指向现有 Hardhat 项目
+  projectDir:     __dirname, // 使用本项目内置的 Hardhat
   port:           8545,
   hostname:       '127.0.0.1',
   chainId:        31337,
