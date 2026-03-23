@@ -685,7 +685,7 @@ function broadcastNodeStatus() {
 // 查找 Hardhat CLI 入口脚本（优先使用指定项目目录）
 function findHardhatCli(projectDir) {
   const candidates = [
-    join(projectDir, 'node_modules', 'hardhat', 'dist', 'src', 'cli.js'),
+    ...(projectDir ? [join(resolve(projectDir), 'node_modules', 'hardhat', 'dist', 'src', 'cli.js')] : []),
     join(__dirname, 'node_modules', 'hardhat', 'dist', 'src', 'cli.js'),
   ]
   for (const p of candidates) {
@@ -805,6 +805,25 @@ async function startHardhatNode() {
         broadcastConsole(`✓ 节点已就绪，监听 ${newUrl}`, 'success')
         // 切换 WS 连接到新节点（同时更新 CONFIG.rpcUrl 并重建订阅）
         switchNode(newUrl)
+        // Hardhat v3 prints accounts AFTER the "Started" line;
+        // fetch via RPC shortly after to ensure node.accounts is populated.
+        setTimeout(async () => {
+          try {
+            const rpcUrl = newUrl
+            const resp = await fetch(rpcUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_accounts', params: [] }),
+            })
+            const { result: addrs } = await resp.json()
+            if (Array.isArray(addrs) && addrs.length > 0) {
+              nodeState.accounts = addrs.map((address, index) => ({
+                index, address, privateKey: HARDHAT_DEFAULT_KEYS[address.toLowerCase()] || null,
+              }))
+              broadcastNodeStatus()
+            }
+          } catch (_) { /* ignore — node may have stopped */ }
+        }, 1500)
       }
     }
   })

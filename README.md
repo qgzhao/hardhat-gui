@@ -55,6 +55,38 @@ Hardhat 是目前最活跃的以太坊开发框架，内置本地节点（基于
 
 ---
 
+## 界面截图
+
+### 账户管理
+
+![账户列表](docs/screenshots/zh/accounts.png)
+
+### 区块浏览
+
+![区块列表](docs/screenshots/zh/blocks.png)
+
+### 交易记录
+
+![交易列表](docs/screenshots/zh/transactions.png)
+
+### 合约 ABI 浏览
+
+![合约](docs/screenshots/zh/contracts.png)
+
+### 事件日志
+
+![日志](docs/screenshots/zh/logs.png)
+
+### 节点管理
+
+![节点](docs/screenshots/zh/node.png)
+
+### 快照与回滚
+
+![快照弹窗](docs/screenshots/zh/snapshot-modal.png)
+
+---
+
 ## 环境要求
 
 | 依赖 | 版本要求 |

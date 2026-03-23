@@ -3,3 +3,9 @@ node-workspace/
 .env
 .env.local
 *.log
+
+# Playwright
+playwright-report/
+test-results/
+tests/fixture-project/artifacts/
+tests/fixture-project/cache/

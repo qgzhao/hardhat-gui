@@ -5,14 +5,22 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start":            "node server.js",
+    "dev":              "node --watch server.js",
+    "test":             "playwright test",
+    "test:headed":      "playwright test --headed",
+    "test:ui":          "playwright test --ui",
+    "test:report":      "playwright show-report",
+    "test:screenshots": "playwright test --grep screenshot"
   },
   "dependencies": {
     "express": "^4.19.2",
     "hardhat": "^3.2.0"
   },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.4.0"
   }
 }

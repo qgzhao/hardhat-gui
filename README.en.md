@@ -55,6 +55,38 @@ Toolbar: mine block, automine toggle, time advance, network snapshot & revert.
 
 ---
 
+## Screenshots
+
+### Account Management
+
+![Accounts](docs/screenshots/en/accounts.png)
+
+### Block Explorer
+
+![Blocks](docs/screenshots/en/blocks.png)
+
+### Transaction History
+
+![Transactions](docs/screenshots/en/transactions.png)
+
+### Contract ABI Browser
+
+![Contracts](docs/screenshots/en/contracts.png)
+
+### Event Logs
+
+![Logs](docs/screenshots/en/logs.png)
+
+### Node Management
+
+![Node](docs/screenshots/en/node.png)
+
+### Snapshot & Revert
+
+![Snapshot Modal](docs/screenshots/en/snapshot-modal.png)
+
+---
+
 ## Requirements
 
 | Dependency | Version |
