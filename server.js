@@ -594,6 +594,41 @@ app.post('/api/rpc', async (req, res) => {
   }
 })
 
+// ============ MetaMask JSON-RPC 代理 ============
+// MetaMask 应连接到此端点（http://127.0.0.1:3000/rpc）而非直连 Hardhat
+// 该代理修复 Hardhat v3 返回非整数错误码导致 MetaMask 报错的问题
+app.post('/rpc', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  try {
+    const body = req.body
+    const upstream = await fetch(CONFIG.rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000)
+    })
+    const json = await upstream.json()
+    // 修复：确保 error.code 是整数（MetaMask 要求符合 JSON-RPC 规范）
+    if (json.error && typeof json.error.code !== 'number') {
+      json.error.code = -32603
+    }
+    if (json.error && !Number.isInteger(json.error.code)) {
+      json.error.code = Math.trunc(json.error.code) || -32603
+    }
+    res.json(json)
+  } catch (err) {
+    res.json({ jsonrpc: '2.0', id: req.body?.id ?? null, error: { code: -32603, message: err.message } })
+  }
+})
+
+app.options('/rpc', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  res.sendStatus(204)
+})
+
 // SSE 实时推送
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream')
